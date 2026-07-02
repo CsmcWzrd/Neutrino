@@ -67,6 +67,14 @@ Neu_Application* Neu_Application::current()
     return current_;
 }
 
+void Neu_Application::quit()
+{
+    running_ = false;
+    if (display_) {
+        XFlush(display_);
+    }
+}
+
 void Neu_Application::registerWindow(Neu_Window* window)
 {
     windows_.push_back(window);

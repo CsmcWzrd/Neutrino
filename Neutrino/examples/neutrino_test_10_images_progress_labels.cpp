@@ -51,6 +51,22 @@ int main(int argc, char** argv)
     auto label = std::make_shared<Neu_Label>(Neu_Layout{300, 95, 320, 40, 1.0f, 390, 55});
     label->setText("Neu_Label with BMP icon");
     label->setIconBmp("assets/icons/button_icon.bmp");
+    Neu_TextFragment normal;
+    normal.text = "Label ";
+    Neu_TextFragment bold;
+    bold.text = "bold ";
+    bold.bold = true;
+    Neu_TextFragment italic;
+    italic.text = "italic ";
+    italic.italic = true;
+    Neu_TextFragment underline;
+    underline.text = "underline";
+    underline.underline = true;
+    label->clearRichTextFragments();
+    label->addRichTextFragment(normal);
+    label->addRichTextFragment(bold);
+    label->addRichTextFragment(italic);
+    label->addRichTextFragment(underline);
     label->setHintText("Single-line labels support BMP icons.");
     win.add(label);
 

@@ -21,20 +21,21 @@ void Neu_Button::draw(Display* display, Drawable drawable, GC gc, const Neu_Them
 
 void Neu_Button::handleXEvent(XEvent& event)
 {
-    if (event.type == MotionNotify) {
-        hover_ = contains(event.xmotion.x, event.xmotion.y);
-    }
-
     if (event.type == ButtonPress && contains(event.xbutton.x, event.xbutton.y)) {
         pressed_ = true;
+        requestRedraw();
     }
 
     if (event.type == ButtonRelease) {
         const bool hit = contains(event.xbutton.x, event.xbutton.y);
-        if (pressed_ && hit) {
+        const bool wasPressed = pressed_;
+        if (wasPressed && hit) {
             invokeClick();
         }
         pressed_ = false;
+        if (wasPressed) {
+            requestRedraw();
+        }
     }
 
     Neu_Control::handleXEvent(event);

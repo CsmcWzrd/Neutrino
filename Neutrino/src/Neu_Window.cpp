@@ -2,6 +2,68 @@
 
 namespace neutrino {
 
+namespace {
+
+Neu_Control* hitOne(const std::shared_ptr<Neu_Control>& control, int x, int y)
+{
+    if (!control || !control->visible() || !control->enabled()) {
+        return nullptr;
+    }
+    if (!control->contains(x, y)) {
+        return nullptr;
+    }
+
+    if (auto scroll = dynamic_cast<Neu_ScrollWindow*>(control.get())) {
+        const int childX = x + scroll->scrollX();
+        const int childY = y + scroll->scrollY();
+        const auto& children = scroll->children();
+        for (auto it = children.rbegin(); it != children.rend(); ++it) {
+            Neu_Control* hit = hitOne(*it, childX, childY);
+            if (hit) {
+                return hit;
+            }
+        }
+        return scroll;
+    }
+
+    if (auto placement = dynamic_cast<Neu_Placement*>(control.get())) {
+        const auto& children = placement->children();
+        for (auto it = children.rbegin(); it != children.rend(); ++it) {
+            Neu_Control* hit = hitOne(*it, x, y);
+            if (hit) {
+                return hit;
+            }
+        }
+    }
+
+    return control.get();
+}
+
+Neu_Control* controlAt(const std::vector<std::shared_ptr<Neu_Control>>& controls, int x, int y)
+{
+    for (auto it = controls.rbegin(); it != controls.rend(); ++it) {
+        Neu_Control* hit = hitOne(*it, x, y);
+        if (hit) {
+            return hit;
+        }
+    }
+
+    return nullptr;
+}
+
+void sendLeave(Neu_Control* control, XEvent& source)
+{
+    if (!control) {
+        return;
+    }
+
+    XEvent leave = source;
+    leave.type = LeaveNotify;
+    control->handleXEvent(leave);
+}
+
+} // namespace
+
 Neu_Window::Neu_Window(Neu_Application& app, int width, int height, const std::string& title)
     : app_(app),
       display_(app.display()),
@@ -82,13 +144,23 @@ void Neu_Window::releaseBuffers()
 
 void Neu_Window::close()
 {
-    if (!window_) {
+    if (!window_ || closing_) {
         return;
     }
 
+    closing_ = true;
+    focusedControl_ = nullptr;
+    hoveredControl_ = nullptr;
+    captureControl_ = nullptr;
+
     releaseBuffers();
     app_.unregisterWindow(this);
-    XFreeGC(display_, gc_);
+
+    if (gc_) {
+        XFreeGC(display_, gc_);
+        gc_ = 0;
+    }
+
     XDestroyWindow(display_, window_);
     window_ = 0;
 }
@@ -145,7 +217,7 @@ void Neu_Window::drawScene(Drawable target)
     }
 }
 
-void Neu_Window::redraw()
+void Neu_Window::paint(Drawable target)
 {
     if (!window_) {
         return;
@@ -156,14 +228,14 @@ void Neu_Window::redraw()
     const int stages = std::max(1, std::min(3, options.bufferStages));
 
     if (!buffered || stages < 2) {
-        drawScene(window_);
+        drawScene(target);
         XFlush(display_);
         return;
     }
 
     ensureBuffers();
     if (!stageBackground_ || !stageCompose_) {
-        drawScene(window_);
+        drawScene(target);
         XFlush(display_);
         return;
     }
@@ -195,7 +267,7 @@ void Neu_Window::redraw()
             }
         }
 
-        XCopyArea(display_, stageFinal_, window_, gc_, 0, 0, width_, height_, 0, 0);
+        XCopyArea(display_, stageFinal_, target, gc_, 0, 0, width_, height_, 0, 0);
     } else {
         for (auto& control : controls_) {
             if (control->visible()) {
@@ -203,10 +275,25 @@ void Neu_Window::redraw()
             }
         }
 
-        XCopyArea(display_, stageCompose_, window_, gc_, 0, 0, width_, height_, 0, 0);
+        XCopyArea(display_, stageCompose_, target, gc_, 0, 0, width_, height_, 0, 0);
     }
 
     XFlush(display_);
+}
+
+void Neu_Window::redraw()
+{
+    paint(window_);
+}
+
+void Neu_Window::invalidate()
+{
+    redraw();
+}
+
+void Neu_Window::requestRedraw()
+{
+    invalidate();
 }
 
 void Neu_Window::setMultiStageDoubleBuffering(bool enabled)
@@ -215,13 +302,39 @@ void Neu_Window::setMultiStageDoubleBuffering(bool enabled)
     if (!enabled) {
         releaseBuffers();
     }
-    redraw();
+    requestRedraw();
 }
 
 void Neu_Window::add(std::shared_ptr<Neu_Control> control)
 {
+    if (!control) {
+        return;
+    }
+
     control->setParent(this);
     controls_.push_back(control);
+}
+
+Neu_Control* Neu_Window::hitTest(int x, int y)
+{
+    return controlAt(controls_, x, y);
+}
+
+void Neu_Window::setFocusedControl(Neu_Control* control)
+{
+    if (focusedControl_ == control) {
+        return;
+    }
+
+    if (focusedControl_) {
+        focusedControl_->setFocused(false);
+    }
+
+    focusedControl_ = control;
+
+    if (focusedControl_) {
+        focusedControl_->setFocused(true);
+    }
 }
 
 void Neu_Window::handleXEvent(XEvent& event)
@@ -236,25 +349,65 @@ void Neu_Window::handleXEvent(XEvent& event)
 
     if (event.type == ConfigureNotify) {
         if (width_ != event.xconfigure.width || height_ != event.xconfigure.height) {
-            width_ = event.xconfigure.width;
-            height_ = event.xconfigure.height;
+            width_ = std::max(1, event.xconfigure.width);
+            height_ = std::max(1, event.xconfigure.height);
             releaseBuffers();
+            requestRedraw();
         }
+        return;
     }
 
-    if (event.type == Expose && event.xexpose.count == 0) {
-        redraw();
-    }
-
-    for (auto& control : controls_) {
-        if (control->visible()) {
-            control->handleXEvent(event);
+    if (event.type == Expose) {
+        if (event.xexpose.count == 0) {
+            redraw();
         }
+        return;
     }
 
-    const bool repaintMotion = Neu_GetSmoothGraphicsOptions().repaintOnMouseMove;
-    if (event.type == ButtonRelease || event.type == KeyPress || event.type == LeaveNotify || (repaintMotion && event.type == MotionNotify)) {
-        redraw();
+    if (event.type == LeaveNotify) {
+        sendLeave(hoveredControl_, event);
+        hoveredControl_ = nullptr;
+        return;
+    }
+
+    if (event.type == MotionNotify) {
+        Neu_Control* target = hitTest(event.xmotion.x, event.xmotion.y);
+        if (target != hoveredControl_) {
+            sendLeave(hoveredControl_, event);
+            hoveredControl_ = target;
+        }
+        if (target) {
+            target->handleXEvent(event);
+        }
+        return;
+    }
+
+    if (event.type == ButtonPress) {
+        Neu_Control* target = hitTest(event.xbutton.x, event.xbutton.y);
+        if (event.xbutton.button <= Button3) {
+            setFocusedControl(target);
+            captureControl_ = target;
+        }
+        if (target) {
+            target->handleXEvent(event);
+        }
+        return;
+    }
+
+    if (event.type == ButtonRelease) {
+        Neu_Control* target = captureControl_ ? captureControl_ : hitTest(event.xbutton.x, event.xbutton.y);
+        if (target) {
+            target->handleXEvent(event);
+        }
+        captureControl_ = nullptr;
+        return;
+    }
+
+    if (event.type == KeyPress) {
+        if (focusedControl_ && focusedControl_->visible() && focusedControl_->enabled()) {
+            focusedControl_->handleXEvent(event);
+        }
+        return;
     }
 }
 

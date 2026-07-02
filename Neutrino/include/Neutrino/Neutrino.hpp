@@ -28,6 +28,7 @@ struct XEvent { UINT message{0}; WPARAM wParam{0}; LPARAM lParam{0}; int x{0}; i
 #include <cmath>
 #include <cstring>
 #include <cstdlib>
+#include <chrono>
 
 namespace neutrino {
 
@@ -54,70 +55,26 @@ struct Neu_Layout {
 
 struct Neu_Color { uint8_t r{0}, g{0}, b{0}, a{255}; };
 
-enum class Neu_TextAlign {
-    Left,
-    Center,
-    Right
-};
+enum class Neu_TextAlignment { Left, Center, Right };
 
-enum Neu_TextStyleFlags : uint32_t {
-    Neu_TextStyle_Normal = 0,
-    Neu_TextStyle_Bold = 1u << 0,
-    Neu_TextStyle_Italic = 1u << 1,
-    Neu_TextStyle_Underline = 1u << 2,
-    Neu_TextStyle_Strikethrough = 1u << 3,
-    Neu_TextStyle_DoubleStrikethrough = 1u << 4,
-    Neu_TextStyle_Monospaced = 1u << 5
-};
-
-struct Neu_RichTextFragment {
+struct Neu_TextFragment {
     std::string text;
-    uint32_t style{Neu_TextStyle_Normal};
+    bool bold{false};
+    bool italic{false};
+    bool underline{false};
+    bool strikethrough{false};
+    bool doubleStrikethrough{false};
+    bool monospace{false};
     int headingLevel{0};
     std::string fontName;
-    Neu_Color fontColor{20, 28, 38, 255};
-    bool hasFontColor{false};
-    Neu_Color backgroundColor{255, 255, 255, 255};
-    bool hasBackgroundColor{false};
-    Neu_Color highlightColor{255, 245, 150, 180};
-    bool hasHighlight{false};
+    Neu_Color fontColor{20,28,38,255};
+    Neu_Color backgroundColor{255,255,255,0};
+    Neu_Color highlightColor{255,240,120,0};
+    bool useFontColor{false};
+    bool useBackgroundColor{false};
+    bool useHighlightColor{false};
 };
 
-inline Neu_RichTextFragment Neu_MakeRichTextFragment(const std::string& text,
-                                                     uint32_t style = Neu_TextStyle_Normal,
-                                                     int headingLevel = 0,
-                                                     const std::string& fontName = std::string(),
-                                                     const Neu_Color* fontColor = nullptr,
-                                                     const Neu_Color* backgroundColor = nullptr,
-                                                     const Neu_Color* highlightColor = nullptr)
-{
-    Neu_RichTextFragment fragment;
-    fragment.text = text;
-    fragment.style = style;
-    fragment.headingLevel = std::max(0, std::min(7, headingLevel));
-    fragment.fontName = fontName;
-    if (fontColor) {
-        fragment.fontColor = *fontColor;
-        fragment.hasFontColor = true;
-    }
-    if (backgroundColor) {
-        fragment.backgroundColor = *backgroundColor;
-        fragment.hasBackgroundColor = true;
-    }
-    if (highlightColor) {
-        fragment.highlightColor = *highlightColor;
-        fragment.hasHighlight = true;
-    }
-    return fragment;
-}
-
-struct Neu_TextLayoutOptions {
-    bool wordWrap{false};
-    bool truncate{true};
-    Neu_TextAlign align{Neu_TextAlign::Left};
-    int lineHeight{18};
-    int padding{0};
-};
 enum class Neu_GraphicsBackend {
     X11Basic,              // plain Xlib primitives
     SoftwareAntialias,     // Cairo-free CPU supersampling pushed through XImage
@@ -130,7 +87,7 @@ struct Neu_SmoothGraphicsOptions {
     int supersample{4};
     bool drawShadows{true};
     bool drawHints{true};
-    bool repaintOnMouseMove{true};
+    bool repaintOnMouseMove{false};
     bool cacheRoundedRects{true};
     bool vmFriendly{false};
     bool multiStageDoubleBuffering{true};
@@ -215,9 +172,11 @@ public:
     Display* display() const { return display_; }
     int screen() const { return screen_; }
     void run();
-    void quit() { running_ = false; }
+    void quit();
     void registerWindow(Neu_Window* win);
     void unregisterWindow(Neu_Window* win);
+    size_t windowCount() const { return windows_.size(); }
+    bool hasWindows() const { return !windows_.empty(); }
     static Neu_Application* current();
     bool xrenderAvailable() const { return xrenderAvailable_; }
 private:
@@ -249,33 +208,21 @@ public:
     bool contains(int x, int y) const;
     void setText(const std::string& text);
     const std::string& text() const { return text_; }
-    void setWordWrap(bool enabled) { wordWrap_ = enabled; requestRedraw(); }
-    bool wordWrap() const { return wordWrap_; }
-    void setTruncateText(bool enabled) { truncateText_ = enabled; requestRedraw(); }
-    bool truncateText() const { return truncateText_; }
-    void setTextAlign(Neu_TextAlign align) { textAlign_ = align; requestRedraw(); }
-    Neu_TextAlign textAlign() const { return textAlign_; }
-    void setFontName(const std::string& fontName) { fontName_ = fontName; requestRedraw(); }
-    const std::string& fontName() const { return fontName_; }
-    void setFontColor(const Neu_Color& color) { fontColor_ = color; hasFontColor_ = true; requestRedraw(); }
-    void clearFontColor() { hasFontColor_ = false; requestRedraw(); }
-    void setBackgroundColor(const Neu_Color& color) { backgroundColor_ = color; hasBackgroundColor_ = true; requestRedraw(); }
-    void clearBackgroundColor() { hasBackgroundColor_ = false; requestRedraw(); }
-    void setHighlightColor(const Neu_Color& color) { highlightColor_ = color; hasHighlight_ = true; requestRedraw(); }
-    void clearHighlightColor() { hasHighlight_ = false; requestRedraw(); }
-    void clearRichTextFragments() { richTextFragments_.clear(); requestRedraw(); }
-    void setRichTextFragments(const std::vector<Neu_RichTextFragment>& fragments) { richTextFragments_ = fragments; requestRedraw(); }
-    void addTextFragment(const Neu_RichTextFragment& fragment) { richTextFragments_.push_back(fragment); requestRedraw(); }
-    void addRichText(const std::string& text, uint32_t style = Neu_TextStyle_Normal, int headingLevel = 0, const std::string& fontName = std::string())
-    {
-        richTextFragments_.push_back(Neu_MakeRichTextFragment(text, style, headingLevel, fontName));
-        requestRedraw();
-    }
-    const std::vector<Neu_RichTextFragment>& richTextFragments() const { return richTextFragments_; }
     void setHintText(const std::string& text) { hintText_ = text; }
     const std::string& hintText() const { return hintText_; }
     void setHintExpanded(bool expanded) { hintExpanded_ = expanded; requestRedraw(); }
     bool hintExpanded() const { return hintExpanded_; }
+    void setWordWrap(bool enabled) { wordWrap_ = enabled; requestRedraw(); }
+    bool wordWrap() const { return wordWrap_; }
+    void setTextTruncation(bool enabled) { truncateText_ = enabled; requestRedraw(); }
+    bool textTruncation() const { return truncateText_; }
+    void setBorderVisible(bool enabled) { borderVisible_ = enabled; requestRedraw(); }
+    bool borderVisible() const { return borderVisible_; }
+    void setTextAlignment(Neu_TextAlignment alignment) { textAlignment_ = alignment; requestRedraw(); }
+    Neu_TextAlignment textAlignment() const { return textAlignment_; }
+    void addRichTextFragment(const Neu_TextFragment& fragment) { richTextFragments_.push_back(fragment); requestRedraw(); }
+    void clearRichTextFragments() { richTextFragments_.clear(); requestRedraw(); }
+    const std::vector<Neu_TextFragment>& richTextFragments() const { return richTextFragments_; }
     void setAutoScroll(bool enabled) { autoScroll_ = enabled; requestRedraw(); }
     bool autoScroll() const { return autoScroll_; }
     void setScrollOffset(int x, int y);
@@ -284,6 +231,8 @@ public:
     void setVirtualSize(int width, int height);
     Neu_Size virtualSize() const { return virtualSize_; }
     bool hovered() const { return hover_; }
+    void setFocused(bool focused) { if (focused_ != focused) { focused_ = focused; requestRedraw(); } }
+    bool focused() const { return focused_; }
     void setIconBmp(const std::string& path) { icon_.load(path); iconPath_ = path; }
     const Neu_IconBmp& icon() const { return icon_; }
     void setCallbacks(const Neu_Callbacks& callbacks) { callbacks_ = callbacks; }
@@ -300,12 +249,11 @@ public:
     virtual void drawScrollbars(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme);
 protected:
     void drawText(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme, const std::string& s, int x, int y);
-    int approximateTextWidth(const std::string& text, uint32_t style = Neu_TextStyle_Normal, int headingLevel = 0) const;
-    std::vector<std::string> wrapTextToWidth(const std::string& text, int maxWidth) const;
-    std::string truncateTextToWidth(const std::string& text, int maxWidth) const;
-    void drawTextInRect(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme, const std::string& text, const Neu_Rect& rect, const Neu_TextLayoutOptions& options);
-    void drawRichTextFragments(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme, const std::vector<Neu_RichTextFragment>& fragments, const Neu_Rect& rect, const Neu_TextLayoutOptions& options);
-    bool handleScrollMouseEvent(XEvent& event);
+    void drawTextColored(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme, const std::string& s, int x, int y, const Neu_Color& color, bool bold = false, bool italic = false, bool underline = false, bool strikethrough = false, bool doubleStrikethrough = false, bool monospace = false, int headingLevel = 0);
+    int measureTextWidth(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme, const std::string& s, bool bold = false, bool italic = false, bool monospace = false, int headingLevel = 0) const;
+    std::vector<std::string> wrapTextToWidth(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme, const std::string& s, int maxWidth) const;
+    std::string truncateTextToWidth(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme, const std::string& s, int maxWidth) const;
+    int alignedTextX(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme, const std::string& s, int left, int width) const;
     void drawIconBmp(Display* d, Drawable drawable, GC gc, int x, int y, int maxSize);
     void invokeClick();
     void invokeTextChanged();
@@ -313,6 +261,10 @@ protected:
     std::string text_;
     std::string hintText_;
     bool hintExpanded_{false};
+    bool wordWrap_{false};
+    bool truncateText_{true};
+    Neu_TextAlignment textAlignment_{Neu_TextAlignment::Left};
+    std::vector<Neu_TextFragment> richTextFragments_;
     Neu_IconBmp icon_;
     std::string iconPath_;
     Neu_Callbacks callbacks_;
@@ -320,24 +272,15 @@ protected:
     bool visible_{true};
     bool enabled_{true};
     bool hover_{false};
-    bool pressed_{false};
     bool focused_{false};
+    bool pressed_{false};
+    bool borderVisible_{false};
     bool autoScroll_{false};
-    bool wordWrap_{false};
-    bool truncateText_{true};
-    Neu_TextAlign textAlign_{Neu_TextAlign::Left};
-    std::string fontName_;
-    Neu_Color fontColor_{20, 28, 38, 255};
-    bool hasFontColor_{false};
-    Neu_Color backgroundColor_{255, 255, 255, 255};
-    bool hasBackgroundColor_{false};
-    Neu_Color highlightColor_{255, 245, 150, 180};
-    bool hasHighlight_{false};
-    std::vector<Neu_RichTextFragment> richTextFragments_;
-    bool scrollDrag_{false};
-    bool scrollDragVertical_{true};
-    int scrollDragAnchor_{0};
-    int scrollDragStartValue_{0};
+    int hoverAnchorX_{0};
+    int hoverAnchorY_{0};
+    std::chrono::steady_clock::time_point hoverStartTime_{};
+    bool hoverHintArmed_{false};
+    int activeScrollDrag_{0};
     int scrollX_{0};
     int scrollY_{0};
     Neu_Size virtualSize_{0, 0};
@@ -361,6 +304,7 @@ public:
     void handleXEvent(XEvent& ev) override;
 protected:
     size_t cursor_{0};
+    int textScrollX_{0};
 };
 
 class Neu_Passwordbox : public Neu_Textbox {
@@ -385,12 +329,18 @@ public:
     void setItems(const std::vector<std::string>& items) { items_ = items; }
     const std::vector<std::string>& items() const { return items_; }
     int selectedIndex() const { return selected_; }
+    void setMultiSelect(bool enabled) { multiSelect_ = enabled; requestRedraw(); }
+    bool multiSelect() const { return multiSelect_; }
+    const std::set<int>& selectedIndices() const { return selectedIndices_; }
     void draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme) override;
     void handleXEvent(XEvent& ev) override;
 protected:
     std::vector<std::string> items_;
     int selected_{-1};
-    int hoverIndex_{-1};
+    int hoveredIndex_{-1};
+    int anchorIndex_{-1};
+    bool multiSelect_{true};
+    std::set<int> selectedIndices_;
 };
 
 class Neu_ComboBox : public Neu_Listbox {
@@ -412,14 +362,20 @@ public:
     void bind(Neu_StringTable* model) { model_ = model; }
     Neu_StringTable* model() const { return model_; }
     Neu_TypedValue cellValue(size_t r, size_t c) const;
+    void setMultiSelect(bool enabled) { multiSelect_ = enabled; requestRedraw(); }
+    bool multiSelect() const { return multiSelect_; }
+    const std::set<int>& selectedRows() const { return selectedRows_; }
     void draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme) override;
     void handleXEvent(XEvent& ev) override;
 private:
     Neu_StringTable* model_{nullptr};
     int selectedRow_{-1};
     int selectedCol_{-1};
-    int hoverRow_{-1};
-    int hoverCol_{-1};
+    int hoveredRow_{-1};
+    int hoveredCol_{-1};
+    int anchorRow_{-1};
+    bool multiSelect_{true};
+    std::set<int> selectedRows_;
 };
 
 class Neu_TreeView : public Neu_ListView {
@@ -430,21 +386,27 @@ public:
     void collapseAll();
     void toggleNodePath(const std::string& path);
     bool isPathCollapsed(const std::string& path) const;
+    void setMultiSelect(bool enabled) { multiSelect_ = enabled; requestRedraw(); }
+    bool multiSelect() const { return multiSelect_; }
+    const std::set<int>& selectedVisibleRows() const { return selectedVisibleRows_; }
     void draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme) override;
     void handleXEvent(XEvent& ev) override;
 
 private:
     std::set<std::string> collapsedPaths_;
     int selectedVisibleRow_{-1};
-    int hoverVisibleRow_{-1};
+    int hoveredVisibleRow_{-1};
+    int anchorVisibleRow_{-1};
+    bool multiSelect_{true};
+    std::set<int> selectedVisibleRows_;
 };
 
 class Neu_Placement : public Neu_Control {
 public:
     using Neu_Control::Neu_Control;
     const char* className() const override { return "Neu_Placement"; }
-    void setParent(Neu_Window* parent) override;
     void add(std::shared_ptr<Neu_Control> child);
+    void setParent(Neu_Window* parent) override;
     const std::vector<std::shared_ptr<Neu_Control>>& children() const { return children_; }
     void draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme) override;
     void handleXEvent(XEvent& ev) override;
@@ -480,6 +442,7 @@ private:
     int total_{100};
     int page_{10};
     int value_{0};
+    bool dragging_{false};
 };
 
 class Neu_ScrollWindow : public Neu_Placement {
@@ -500,7 +463,7 @@ public:
 
 class Neu_MultilineLabel : public Neu_Label {
 public:
-    explicit Neu_MultilineLabel(Neu_Layout layout = {});
+    using Neu_Label::Neu_Label;
     const char* className() const override { return "Neu_MultilineLabel"; }
     void draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme) override;
 };
@@ -514,12 +477,20 @@ public:
     void setLanguageName(const std::string& language) { languageName_ = language; }
     void setToolbarVisible(bool visible) { toolbarVisible_ = visible; requestRedraw(); }
     bool toolbarVisible() const { return toolbarVisible_; }
+    void setDefaultFontName(const std::string& fontName) { defaultFontName_ = fontName; requestRedraw(); }
+    void setDefaultFontColor(const Neu_Color& color) { defaultFontColor_ = color; requestRedraw(); }
+    void setDefaultBackgroundColor(const Neu_Color& color) { defaultBackgroundColor_ = color; requestRedraw(); }
+    void setSketchHighlightColor(const Neu_Color& color) { sketchHighlightColor_ = color; requestRedraw(); }
     void draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme) override;
     void handleXEvent(XEvent& ev) override;
 private:
     bool readOnly_{false};
     bool toolbarVisible_{true};
     std::string languageName_{"C++17"};
+    std::string defaultFontName_;
+    Neu_Color defaultFontColor_{20,28,38,255};
+    Neu_Color defaultBackgroundColor_{255,255,255,0};
+    Neu_Color sketchHighlightColor_{255,240,120,160};
 };
 
 class Neu_ProgressSquare : public Neu_Control {
@@ -548,18 +519,17 @@ public:
     void setIconList(const std::vector<std::string>& bmpIconPaths);
     void setLabelSpacing(int pixels) { labelSpacing_ = std::max(0, pixels); }
     void setLabelLineSpacing(int pixels) { labelLineSpacing_ = std::max(0, pixels); }
-    void no_crlf() { appendNextWithoutCrLf_ = true; }
-    void crlf() { appendNextWithoutCrLf_ = false; cursorX_ = 12; cursorY_ += labelSpacing_; }
+    void no_crlf() { appendNextInline_ = true; }
+    void crlf();
     void addLabel(const std::string& text);
-    void addLabel(const std::vector<Neu_RichTextFragment>& fragments);
     void addMultilineLabel(const std::string& text);
 private:
     std::vector<std::string> iconPaths_;
     int labelSpacing_{8};
     int labelLineSpacing_{4};
-    int cursorX_{12};
-    int cursorY_{12};
-    bool appendNextWithoutCrLf_{false};
+    int contentCursorX_{12};
+    int contentCursorY_{12};
+    bool appendNextInline_{false};
     size_t iconIndexForText(const std::string& text) const;
 };
 
@@ -571,6 +541,9 @@ public:
     void show();
     void close();
     void redraw();
+    void invalidate();
+    void requestRedraw();
+    void paint(Drawable target);
     void setMultiStageDoubleBuffering(bool enabled);
     bool multiStageDoubleBuffering() const { return multiStageDoubleBuffering_; }
     void add(std::shared_ptr<Neu_Control> control);
@@ -594,6 +567,10 @@ private:
     std::vector<std::shared_ptr<Neu_Control>> controls_;
     Neu_WindowCallback onClose_{nullptr};
     void* closeUserData_{nullptr};
+    Neu_Control* focusedControl_{nullptr};
+    Neu_Control* hoveredControl_{nullptr};
+    Neu_Control* captureControl_{nullptr};
+    bool closing_{false};
     bool multiStageDoubleBuffering_{true};
 #ifdef _WIN32
     HDC memoryDc_{nullptr};
@@ -609,6 +586,8 @@ private:
     void ensureBuffers();
     void releaseBuffers();
     void drawScene(Drawable target);
+    Neu_Control* hitTest(int x, int y);
+    void setFocusedControl(Neu_Control* control);
 };
 
 unsigned long Neu_Pixel(Display* d, const Neu_Color& color);

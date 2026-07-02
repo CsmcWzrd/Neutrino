@@ -27,6 +27,8 @@ int main(int argc, char** argv)
         "assets/icons/menu_icon.bmp",
         "assets/icons/save_icon.bmp"
     });
+    rich->setLabelSpacing(12);
+    rich->setLabelLineSpacing(8);
     rich->setHintText("Neu_ReadOnlyRichText adds Neu_Label and Neu_MultilineLabel subcomponents. The number of unescaped # characters chooses an icon from an STL vector.");
     rich->addLabel("# Section label uses icon index 1");
     rich->addMultilineLabel("## Multiline label uses icon index 2\nIt can hold documentation-style text.\nEscaped hash example: \\# displays a literal #.");

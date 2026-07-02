@@ -1,9 +1,5 @@
 Neutrino Proprietary Notice
-===========================
 
-This source package is proprietary and all rights are reserved by the project owner.
-No open-source license, public-domain dedication, redistribution grant,
-sublicensing grant, or commercial-use grant is included in this package.
+This software package and its source code are proprietary. No open-source license is granted by this package. Copying, redistribution, sublicensing, publication, sale, transfer, or reuse outside the owner's private/internal use requires a separate written agreement with the copyright holder.
 
-Possession of the source archive does not grant any license rights beyond the
-permissions separately granted in writing by the project owner.
+THE SOFTWARE IS PROVIDED WITHOUT ANY EXPRESS OR IMPLIED WARRANTY TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW.

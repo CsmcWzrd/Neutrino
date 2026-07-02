@@ -6,8 +6,6 @@ namespace neutrino {
 
 namespace {
 
-constexpr int kTreeRowHeight = 22;
-
 struct TreeRowInfo {
     size_t modelRow{0};
     int depth{0};
@@ -16,16 +14,11 @@ struct TreeRowInfo {
     bool hasChildren{false};
 };
 
-static bool isBlank(const std::string& text)
-{
-    return text.empty();
-}
-
 static std::vector<std::string> rowPath(const std::vector<std::string>& row)
 {
     std::vector<std::string> path;
     for (const auto& cell : row) {
-        if (!isBlank(cell)) {
+        if (!cell.empty()) {
             path.push_back(cell);
         }
     }
@@ -93,6 +86,44 @@ static std::vector<TreeRowInfo> buildRows(const Neu_StringTable* model, const st
     return rows;
 }
 
+static void applyVisibleSelection(std::set<int>& rows, int& selected, int& anchor, int row, bool ctrl, bool shift, bool multi)
+{
+    if (!multi) {
+        rows.clear();
+        rows.insert(row);
+        selected = row;
+        anchor = row;
+        return;
+    }
+    if (shift && anchor >= 0) {
+        rows.clear();
+        const int lo = std::min(anchor, row);
+        const int hi = std::max(anchor, row);
+        for (int i = lo; i <= hi; ++i) {
+            rows.insert(i);
+        }
+        selected = row;
+        return;
+    }
+    if (ctrl) {
+        if (rows.count(row)) {
+            rows.erase(row);
+            if (selected == row) {
+                selected = rows.empty() ? -1 : *rows.rbegin();
+            }
+        } else {
+            rows.insert(row);
+            selected = row;
+        }
+        anchor = row;
+        return;
+    }
+    rows.clear();
+    rows.insert(row);
+    selected = row;
+    anchor = row;
+}
+
 } // namespace
 
 void Neu_TreeView::expandAll()
@@ -142,78 +173,97 @@ void Neu_TreeView::draw(Display* display, Drawable drawable, GC gc, const Neu_Th
     }
 
     const auto rect = bounds();
+    constexpr int rowHeight = 22;
     const auto rows = buildRows(model(), collapsedPaths_);
-    autoScroll_ = autoScroll_ || static_cast<int>(rows.size()) * kTreeRowHeight > rect.height;
-    setVirtualSize(rect.width, std::max(rect.height, static_cast<int>(rows.size()) * kTreeRowHeight + 12));
+    int maxLabelWidth = rect.width;
+    for (const auto& row : rows) {
+        maxLabelWidth = std::max(maxLabelWidth, row.depth * 18 + measureTextWidth(display, drawable, gc, theme, row.label) + 48);
+    }
+    setAutoScroll(true);
+    setVirtualSize(std::max(rect.width, maxLabelWidth), std::max(rect.height, static_cast<int>(rows.size()) * rowHeight + 12));
 
-    XRectangle clip{};
-    clip.x = static_cast<short>(rect.x + 2);
-    clip.y = static_cast<short>(rect.y + 2);
-    clip.width = static_cast<unsigned short>(std::max(0, rect.width - 14));
-    clip.height = static_cast<unsigned short>(std::max(0, rect.height - 14));
+    XRectangle clip{static_cast<short>(rect.x + 4),
+                    static_cast<short>(rect.y + 4),
+                    static_cast<unsigned short>(std::max(1, rect.width - 16)),
+                    static_cast<unsigned short>(std::max(1, rect.height - 16))};
     XSetClipRectangles(display, gc, 0, 0, &clip, 1, Unsorted);
 
     int y = rect.y + 20 - scrollY();
-    for (size_t index = 0; index < rows.size(); ++index, y += kTreeRowHeight) {
+    for (size_t index = 0; index < rows.size(); ++index, y += rowHeight) {
         if (y < rect.y + 8) {
             continue;
         }
-        if (y >= rect.y + rect.height - 4) {
+        if (y >= rect.y + rect.height - 6) {
             break;
         }
-        if (static_cast<int>(index) == selectedVisibleRow_ || static_cast<int>(index) == hoverVisibleRow_) {
-            XSetForeground(display, gc, Neu_Pixel(display, static_cast<int>(index) == selectedVisibleRow_ ? theme.pressed : theme.hover));
-            XFillRectangle(display, drawable, gc, rect.x + 4, y - 15, rect.width - 18, kTreeRowHeight);
+
+        const int visibleIndex = static_cast<int>(index);
+        if (selectedVisibleRows_.count(visibleIndex) != 0U || visibleIndex == selectedVisibleRow_ || visibleIndex == hoveredVisibleRow_) {
+            XSetForeground(display, gc, Neu_Pixel(display, (selectedVisibleRows_.count(visibleIndex) != 0U || visibleIndex == selectedVisibleRow_) ? theme.pressed : theme.hover));
+            XFillRectangle(display, drawable, gc, rect.x + 4, y - 16, rect.width - 18, rowHeight);
         }
+
         const auto& row = rows[index];
         const int indent = row.depth * 18;
         const std::string indicator = row.hasChildren ? (isPathCollapsed(row.path) ? "+ " : "- ") : "  ";
-        drawTextInRect(display,
-                       drawable,
-                       gc,
-                       theme,
-                       indicator + row.label,
-                       Neu_Rect{rect.x + 8 + indent, y - 15, rect.width - 24 - indent, kTreeRowHeight},
-                       Neu_TextLayoutOptions{false, true, Neu_TextAlign::Left, kTreeRowHeight, 0});
+        const int textX = rect.x + 8 + indent - scrollX();
+        const int clipLeft = std::max(textX, rect.x + 6);
+        const int clipRight = rect.x + rect.width - 14;
+        if (clipRight <= clipLeft) {
+            continue;
+        }
+        XRectangle textClip{static_cast<short>(clipLeft),
+                            static_cast<short>(rect.y + 4),
+                            static_cast<unsigned short>(std::max(1, clipRight - clipLeft)),
+                            static_cast<unsigned short>(std::max(1, rect.height - 14))};
+        XSetClipRectangles(display, gc, 0, 0, &textClip, 1, Unsorted);
+        const int drawX = std::max(textX, clipLeft + 2);
+        const int maxTextWidth = std::max(1, clipRight - drawX - 2);
+        drawText(display,
+                 drawable,
+                 gc,
+                 theme,
+                 truncateTextToWidth(display, drawable, gc, theme, indicator + row.label, maxTextWidth),
+                 drawX,
+                 y);
+        XSetClipRectangles(display, gc, 0, 0, &clip, 1, Unsorted);
     }
     XSetClipMask(display, gc, None);
     drawScrollbars(display, drawable, gc, theme);
+    drawHintPopup(display, drawable, gc, theme);
 }
 
 void Neu_TreeView::handleXEvent(XEvent& event)
 {
-    if (!model()) {
-        Neu_Control::handleXEvent(event);
-        return;
-    }
-    const auto rect = bounds();
-    const auto rows = buildRows(model(), collapsedPaths_);
-
-    if (event.type == MotionNotify) {
-        int hover = -1;
-        if (contains(event.xmotion.x, event.xmotion.y)) {
-            hover = (event.xmotion.y - rect.y + scrollY()) / kTreeRowHeight;
-            if (hover < 0 || hover >= static_cast<int>(rows.size())) {
-                hover = -1;
-            }
-        }
-        if (hover != hoverVisibleRow_) {
-            hoverVisibleRow_ = hover;
+    if (event.type == MotionNotify && contains(event.xmotion.x, event.xmotion.y) && model()) {
+        const auto rect = bounds();
+        const int visibleRow = (event.xmotion.y - rect.y + scrollY()) / 22;
+        const auto rows = buildRows(model(), collapsedPaths_);
+        const int validRow = (visibleRow >= 0 && visibleRow < static_cast<int>(rows.size())) ? visibleRow : -1;
+        if (validRow != hoveredVisibleRow_) {
+            hoveredVisibleRow_ = validRow;
             requestRedraw();
         }
     }
 
-    if (event.type == LeaveNotify && hoverVisibleRow_ != -1) {
-        hoverVisibleRow_ = -1;
-        requestRedraw();
+    if (event.type == LeaveNotify) {
+        if (hoveredVisibleRow_ != -1) {
+            hoveredVisibleRow_ = -1;
+            requestRedraw();
+        }
     }
 
-    if (event.type == ButtonRelease && contains(event.xbutton.x, event.xbutton.y)) {
-        const int visibleRow = (event.xbutton.y - rect.y + scrollY()) / kTreeRowHeight;
+    if (event.type == ButtonRelease && contains(event.xbutton.x, event.xbutton.y) && model()) {
+        const auto rect = bounds();
+        const int visibleRow = (event.xbutton.y - rect.y + scrollY()) / 22;
+        const auto rows = buildRows(model(), collapsedPaths_);
+
         if (visibleRow >= 0 && visibleRow < static_cast<int>(rows.size())) {
+            const bool ctrl = (event.xbutton.state & ControlMask) != 0U;
+            const bool shift = (event.xbutton.state & ShiftMask) != 0U;
+            applyVisibleSelection(selectedVisibleRows_, selectedVisibleRow_, anchorVisibleRow_, visibleRow, ctrl, shift, true);
             const auto& row = rows[static_cast<size_t>(visibleRow)];
-            selectedVisibleRow_ = visibleRow;
-            if (row.hasChildren && event.xbutton.x <= rect.x + 30 + row.depth * 18) {
+            if (row.hasChildren && !ctrl && !shift) {
                 toggleNodePath(row.path);
             }
             if (callbacks_.onSelectionChanged) {
