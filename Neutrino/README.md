@@ -4,30 +4,6 @@ Neutrino is a small C++17 GUI framework prototype for Linux/X11 and Windows/Win3
 
 
 
-
-## 0.2.1 windowing and event-dispatch fixes
-
-This update focuses on the Windows backend and Linux event-loop regression checks.
-
-Windows fixes included:
-
-- Window close now tears down the native window, unregisters it from the application, and posts quit only after the last Neutrino window is closed.
-- The Win32 loop now uses normal `GetMessageW()` blocking dispatch; control redraw requests are coalesced through `InvalidateRect()` instead of repainting immediately for every mouse event.
-- `WM_PAINT` now renders through the paint DC, and `WM_ERASEBKGND` is suppressed to reduce flicker.
-- Mouse events are routed to the hovered/captured control instead of being broadcast to every control.
-- Keyboard input is routed only to the focused control, so `Neu_Textbox`, `Neu_Passwordbox`, and multiline text controls work correctly after clicking them.
-- Mouse wheel scrolling is routed to the hovered control, with Shift+wheel for horizontal scrolling.
-- Windows window creation now treats the requested width and height as client-area size using `AdjustWindowRectEx()`, which fixes the control layout offset/clipping caused by caption and border dimensions.
-- The Win32 BMP loader no longer performs a second accidental read at EOF, so BMP icons load correctly into controls.
-- The Win32 backend now enables DPI awareness and uses a cached ClearType Segoe UI font instead of recreating a font object for every text draw.
-
-Linux/X11 fixes included:
-
-- Event routing is now targeted for motion, button, and key events instead of broadcasting every event to every top-level control.
-- Text input now goes to the focused control selected by mouse click.
-- Mouse hover enter/leave invalidation is reduced, which lowers CPU use on VirtualBox/KDE and other slower composited environments.
-- `Neu_Placement` now propagates its parent window to nested controls so nested controls can request redraws reliably.
-
 ## Windows / Visual Studio 2022 build
 
 The project now includes a native Windows backend implemented with basic Win32/GDI calls. It does not use X11 on Windows and does not require GTK, Qt, wxWidgets, Cairo, or signals/slots. The same public C++17 API uses the `Neu_` prefix, for example `Neu_Window`, `Neu_Button`, `Neu_Textbox`, `Neu_ListView`, and `Neu_Callbacks`.
@@ -43,7 +19,35 @@ Projects included:
 | Project | Type | Purpose |
 |---|---|---|
 | `Neutrino` | Static library | Builds the Win32/GDI implementation from `src/win32/Neu_Win32.cpp`. |
-| `NeutrinoWin32Demo` | Windows app | Demonstrates `Neu_Button`, `Neu_Textbox`, `Neu_Passwordbox`, `Neu_Listbox`, `Neu_Label`, `Neu_ProgressSquare`, `Neu_ReadOnlyRichText`, BMP icons, function-pointer callbacks, and software double buffering on Windows. |
+| `NeutrinoWin32Demo` | Windows app | Native Win32 starter demo for buttons, textboxes, listbox, labels, progress square, read-only rich text, BMP icons, callbacks, and double buffering. |
+| `NeutrinoDemo` | Console-subsystem GUI app | Builds `examples/demo.cpp`, the compact cross-platform starter demo. |
+| `NeutrinoTestAllControls` | Console-subsystem GUI app | Broad smoke/demo app covering the original all-controls sample. |
+| `NeutrinoTestWindows` | Console-subsystem GUI app | Main-window, dialog-window, close callback, and theme switching demo. |
+| `NeutrinoTestTypedViews` | Console-subsystem GUI app | Typed ListView/TreeView data interpretation demo. |
+| `NeutrinoTestSmoothGraphics` | Console-subsystem GUI app | Smooth rendering, anti-aliasing, and graphics backend demo. |
+| `NeutrinoTestTreeViewCollapse` | Console-subsystem GUI app | Collapsible TreeView demo. |
+| `NeutrinoTestHeavyData` | Console-subsystem GUI app | Heavy data and auto-scroll demo. |
+| `NeutrinoTest01ButtonsIcons` | Console-subsystem GUI app | Button, flat-button, menu-item, nested placement, BMP icon, hover, and callback test. |
+| `NeutrinoTest02TextInputs` | Console-subsystem GUI app | Textbox, passwordbox, multiline textbox, edit routing, and text callback test. |
+| `NeutrinoTest03ListsComboAutoScroll` | Console-subsystem GUI app | Listbox, combobox, large datasets, and auto-scroll test. |
+| `NeutrinoTest04ListViewTypedData` | Console-subsystem GUI app | ListView bound to `std::vector<std::vector<std::string>>` with string-to-type interpretation. |
+| `NeutrinoTest05TreeViewCollapse` | Console-subsystem GUI app | TreeView bound to the STL model with expand/collapse actions. |
+| `NeutrinoTest06PlacementLayoutScaling` | Console-subsystem GUI app | Fixed layout, scale factor, max size, and nested placement test. |
+| `NeutrinoTest07PopupMenuCategories` | Console-subsystem GUI app | Pop-window menu with left categories and right item view. |
+| `NeutrinoTest08RichTextCode` | Console-subsystem GUI app | Simple coding rich text control demo. |
+| `NeutrinoTest09ReadOnlyRichTextIcons` | Console-subsystem GUI app | Read-only rich text with label/multiline-label children and `#` icon selection. |
+| `NeutrinoTest10ImagesProgressLabels` | Console-subsystem GUI app | ImageView, ProgressSquare, Label, and MultilineLabel test. |
+| `NeutrinoTest11RenderingBuffering` | Console-subsystem GUI app | Rendering options, VM mode, shadows, and multi-stage double buffering test. |
+| `NeutrinoTest12ScrollWindowsHeavyData` | Console-subsystem GUI app | ScrollWindow, standalone ScrollBar, ListView, TreeView, and heavy data test. |
+
+All VS2022 test projects reference the `Neutrino` static library project and set the debugger working directory to the repository root so `assets/icons/*.bmp` resolves when launched from Visual Studio.
+
+MSVC project settings are explicit for Windows builds:
+
+- Every `.vcxproj` uses `<LanguageStandard>stdcpp17</LanguageStandard>`.
+- Every Debug and Release configuration defines `_CRT_SECURE_NO_WARNINGS` in `PreprocessorDefinitions`.
+- `/utf-8` is enabled in `AdditionalOptions` for source and string literal handling.
+- `ConformanceMode` is enabled for the compiler settings in the project files.
 
 The Windows backend uses:
 
@@ -167,24 +171,40 @@ No Cairo dependency is used. Link requirements remain X11 plus `libdl` on Linux.
 
 ## Test applications
 
-The package now includes multiple test applications that depict usage of all requested controls and windows:
+The package now includes a larger cross-platform test/demo suite. The Linux Makefile, Linux CMake project, autoconf Makefile, Windows CMake path, and `msvc/Neutrino.sln` all wire these targets into the build.
 
-| Binary | Source | Purpose |
+| Binary / VS project | Source | Coverage |
 |---|---|---|
-| `neutrino_demo` | `examples/demo.cpp` | Compact starter demo using the framework basics. |
-| `neutrino_test_all_controls` | `examples/test_all_controls.cpp` | Displays Neu_Textbox, Neu_Passwordbox, Neu_Multilinetextbox, Neu_Listbox, Neu_ComboBox, Neu_ListView, Neu_TreeView, Neu_Button, Neu_FlatButton, Neu_MenuItem, Neu_Placement, Neu_PopWindowMenu, BMP icons, themes, layout scaling metadata, and function pointer callbacks. |
-| `neutrino_test_windows` | `examples/test_windows.cpp` | Demonstrates Neu_Window as a main window and dialog-style window, close callbacks, theme switching, and pop-window menu usage. |
-| `neutrino_test_typed_views` | `examples/test_typed_views.cpp` | Demonstrates ListView/TreeView binding to `std::vector<std::vector<std::string>>` and string-to-datatype interpretation for numbers, binary values, hex, checkbox/booleans, tristate, enum, image, float/double, and UTF strings. |
-| `neutrino_test_smooth_graphics` | `examples/test_smooth_graphics.cpp` | Demonstrates antialiased rounded controls, backend switching, and the Cairo-free smooth graphics API. |
+| `neutrino_demo` / `NeutrinoDemo` | `examples/demo.cpp` | Compact starter demo. |
+| `neutrino_test_all_controls` / `NeutrinoTestAllControls` | `examples/test_all_controls.cpp` | Broad all-controls test: textboxes, list controls, list/tree views, buttons, placement, pop menu, icons, callbacks, themes. |
+| `neutrino_test_windows` / `NeutrinoTestWindows` | `examples/test_windows.cpp` | Main window, dialog-style window, close callback, theme switching, pop menu. |
+| `neutrino_test_typed_views` / `NeutrinoTestTypedViews` | `examples/test_typed_views.cpp` | ListView/TreeView STL model binding and string-to-datatype interpretation. |
+| `neutrino_test_smooth_graphics` / `NeutrinoTestSmoothGraphics` | `examples/test_smooth_graphics.cpp` | Anti-aliased rounded drawing and smooth graphics options. |
+| `neutrino_test_treeview_collapse` / `NeutrinoTestTreeViewCollapse` | `examples/test_treeview_collapse.cpp` | TreeView collapse/expand behavior. |
+| `neutrino_test_heavy_data` / `NeutrinoTestHeavyData` | `examples/test_heavy_data.cpp` | Large datasets, auto-scroll, rich/code text, images, labels, and progress square. |
+| `neutrino_test_01_buttons_icons` / `NeutrinoTest01ButtonsIcons` | `examples/neutrino_test_01_buttons_icons.cpp` | `Neu_Button`, `Neu_FlatButton`, `Neu_MenuItem`, BMP icons, hover, nested placement, callbacks. |
+| `neutrino_test_02_text_inputs` / `NeutrinoTest02TextInputs` | `examples/neutrino_test_02_text_inputs.cpp` | `Neu_Textbox`, `Neu_Passwordbox`, `Neu_Multilinetextbox`, keyboard/text routing. |
+| `neutrino_test_03_lists_combo_autoscroll` / `NeutrinoTest03ListsComboAutoScroll` | `examples/neutrino_test_03_lists_combo_autoscroll.cpp` | `Neu_Listbox`, `Neu_ComboBox`, heavy row counts, auto-scroll. |
+| `neutrino_test_04_listview_typed_data` / `NeutrinoTest04ListViewTypedData` | `examples/neutrino_test_04_listview_typed_data.cpp` | `Neu_ListView`, `std::vector<std::vector<std::string>>`, typed value interpretation. |
+| `neutrino_test_05_treeview_collapse` / `NeutrinoTest05TreeViewCollapse` | `examples/neutrino_test_05_treeview_collapse.cpp` | `Neu_TreeView`, expand all, collapse all, hierarchical paths. |
+| `neutrino_test_06_placement_layout_scaling` / `NeutrinoTest06PlacementLayoutScaling` | `examples/neutrino_test_06_placement_layout_scaling.cpp` | `Neu_Placement`, fixed coordinates, scaling factor, max width/height, nested controls. |
+| `neutrino_test_07_popup_menu_categories` / `NeutrinoTest07PopupMenuCategories` | `examples/neutrino_test_07_popup_menu_categories.cpp` | `Neu_PopWindowMenu`, category sidebar, right-side item view, menu-item icons. |
+| `neutrino_test_08_richtext_code` / `NeutrinoTest08RichTextCode` | `examples/neutrino_test_08_richtext_code.cpp` | `Neu_RichTextCode`, code text, read-only/editable behavior, scrolling. |
+| `neutrino_test_09_readonly_richtext_icons` / `NeutrinoTest09ReadOnlyRichTextIcons` | `examples/neutrino_test_09_readonly_richtext_icons.cpp` | `Neu_ReadOnlyRichText`, `Neu_Label`/`Neu_MultilineLabel` children, icon vector, `#` parsing and `\#` escaping. |
+| `neutrino_test_10_images_progress_labels` / `NeutrinoTest10ImagesProgressLabels` | `examples/neutrino_test_10_images_progress_labels.cpp` | `Neu_ImageView`, `Neu_ProgressSquare`, `Neu_Label`, `Neu_MultilineLabel`. |
+| `neutrino_test_11_rendering_buffering` / `NeutrinoTest11RenderingBuffering` | `examples/neutrino_test_11_rendering_buffering.cpp` | Shadows, hints, hover highlight, VM-friendly mode, multi-stage double buffering. |
+| `neutrino_test_12_scroll_windows_heavy_data` / `NeutrinoTest12ScrollWindowsHeavyData` | `examples/neutrino_test_12_scroll_windows_heavy_data.cpp` | `Neu_ScrollWindow`, `Neu_ScrollBar`, heavy ListView/TreeView data, auto-scroll. |
 
-These examples are graphical X11 applications. Run them from the project root so the sample BMP path resolves correctly:
+Run Linux tests from the project root so BMP asset paths resolve correctly:
 
 ```sh
-./build/neutrino_test_all_controls
-./build/neutrino_test_windows
-./build/neutrino_test_typed_views
-./build/neutrino_test_smooth_graphics
+make
+./build/neutrino_test_01_buttons_icons
+./build/neutrino_test_02_text_inputs
+./build/neutrino_test_12_scroll_windows_heavy_data
 ```
+
+On Windows, open `msvc/Neutrino.sln`, build `Neutrino`, then run any `NeutrinoTest*` project. The test projects use the same public `Neu_` API and the native Win32/GDI backend.
 
 ## Build with CMake
 
@@ -194,10 +214,9 @@ cd build
 cmake ..
 cmake --build .
 ./neutrino_demo
-./neutrino_test_all_controls
-./neutrino_test_windows
-./neutrino_test_typed_views
-./neutrino_test_smooth_graphics
+./neutrino_test_01_buttons_icons
+./neutrino_test_02_text_inputs
+./neutrino_test_12_scroll_windows_heavy_data
 ```
 
 ## Build with basic Makefile
@@ -205,10 +224,9 @@ cmake --build .
 ```sh
 make
 ./build/neutrino_demo
-./build/neutrino_test_all_controls
-./build/neutrino_test_windows
-./build/neutrino_test_typed_views
-./build/neutrino_test_smooth_graphics
+./build/neutrino_test_01_buttons_icons
+./build/neutrino_test_02_text_inputs
+./build/neutrino_test_12_scroll_windows_heavy_data
 ```
 
 ## Build with autoconf
@@ -218,10 +236,9 @@ make
 ./configure
 make -f Makefile.autoconf
 ./build-autoconf/neutrino_demo
-./build-autoconf/neutrino_test_all_controls
-./build-autoconf/neutrino_test_windows
-./build-autoconf/neutrino_test_typed_views
-./build-autoconf/neutrino_test_smooth_graphics
+./build-autoconf/neutrino_test_01_buttons_icons
+./build-autoconf/neutrino_test_02_text_inputs
+./build-autoconf/neutrino_test_12_scroll_windows_heavy_data
 ```
 
 ## Notes
@@ -411,39 +428,38 @@ NEUTRINO_VM_MODE=1 ./build/neutrino_test_heavy_data
 
 VM mode keeps multi-stage buffering enabled but disables expensive supersampled drawing and soft shadows.
 
-## 2026-07-02 Windows event loop, close, focus, and layout fixes
 
-This revision updates the Win32/GDI backend so the Windows demo behaves more like the Linux/X11 backend while still using the same `Neu_` public API.
+Projects included in `msvc/Neutrino.sln` now cover the core library, the native Win32 demo, and the full graphical test suite. The solution contains dedicated VS2022 projects for every common Linux/Windows demo listed in `TEST_APPLICATIONS.md`, including the 12 new focused tests for buttons/icons, text inputs, list/combo auto-scroll, ListView typed data, TreeView collapse, layout/placement, pop-window menus, coding rich text, read-only rich text, images/progress/labels, rendering/double buffering, and heavy scroll windows.
 
-Fixes included:
 
-- Window close now calls the optional `setOnClose()` callback, unregisters the window, destroys the native `HWND`, and quits the application loop when the last window closes.
-- `Neu_Application::quit()` is now implemented per platform. On Windows it posts `PostQuitMessage(0)` so `GetMessageW()` does not remain blocked.
-- Windows redraws now use invalidation plus `WM_PAINT` instead of immediate redraws from every control change. This lowers idle CPU usage and prevents paint-loop churn.
-- Windows uses the paint `HDC` from `BeginPaint()` and still keeps software double buffering through a compatible memory DC and `BitBlt`.
-- Windows creates the top-level window with `AdjustWindowRectEx()` so the requested `Neu_Window(width, height, title)` size maps to the client area. This fixes the control layout appearing shifted or clipped by the title bar and borders.
-- The Windows backend calls `SetProcessDPIAware()` so control positions and sizes are not unexpectedly scaled by legacy DPI virtualization.
-- Mouse focus and keyboard focus are now tracked by `Neu_Window`. Keyboard messages are delivered only to the focused control.
-- `Neu_Textbox`, `Neu_Passwordbox`, and `Neu_Multilinetextbox` now support focused text entry, caret display, Backspace/Delete/Home/End/Left/Right, and text-change callbacks on Windows.
-- Mouse wheel scrolling is routed to the hovered or focused scrollable control on Windows.
-- Windows Listbox/ListView controls now set their virtual size and draw scrollbars when `setAutoScroll(true)` is enabled.
-- Linux/X11 was rechecked after the shared header changes; focus routing, textbox caret drawing, and invalidated redraw scheduling are present in the Linux path as well.
 
-Reverified Linux build commands for this revision:
+## 2026-07-02 expanded cross-platform test suite
 
-```sh
-make
-cmake -S . -B cmake-build
-cmake --build cmake-build -j1
-./autogen.sh
-./configure
-make -f Makefile.autoconf -j1
+This revision adds 12 new focused graphical test applications and wires them into Linux Makefile, CMake, autoconf, Windows CMake, and `msvc/Neutrino.sln`. Together with the existing demos, the project now has 19 common Linux/Windows demo binaries plus the Windows-only `NeutrinoWin32Demo`.
+
+The new focused tests are:
+
+1. `neutrino_test_01_buttons_icons`
+2. `neutrino_test_02_text_inputs`
+3. `neutrino_test_03_lists_combo_autoscroll`
+4. `neutrino_test_04_listview_typed_data`
+5. `neutrino_test_05_treeview_collapse`
+6. `neutrino_test_06_placement_layout_scaling`
+7. `neutrino_test_07_popup_menu_categories`
+8. `neutrino_test_08_richtext_code`
+9. `neutrino_test_09_readonly_richtext_icons`
+10. `neutrino_test_10_images_progress_labels`
+11. `neutrino_test_11_rendering_buffering`
+12. `neutrino_test_12_scroll_windows_heavy_data`
+
+See `TEST_APPLICATIONS.md` for the full source/project mapping and coverage table.
+
+## 2026-07-02 Visual Studio C++17 settings update
+
+All Visual Studio 2022 project files under `msvc/` now explicitly use the MSVC C++17 language setting:
+
+```xml
+<LanguageStandard>stdcpp17</LanguageStandard>
 ```
 
-The Visual Studio solution remains:
-
-```text
-msvc/Neutrino.sln
-```
-
-I could not run MSVC inside the Linux container, but the Win32 backend source and VS2022 project files are updated for the native Windows path.
+All Windows configurations also define `_CRT_SECURE_NO_WARNINGS` together with `WIN32_LEAN_AND_MEAN`, `NOMINMAX`, `UNICODE`, and `_UNICODE`. The Windows CMake target also exports `_CRT_SECURE_NO_WARNINGS` for generated Visual Studio builds.

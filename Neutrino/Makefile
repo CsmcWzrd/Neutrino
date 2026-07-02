@@ -32,7 +32,25 @@ SRC = src/Neu_Application.cpp \
     src/Neu_Window.cpp
 OBJ = $(SRC:src/%.cpp=build/%.o)
 LIB = build/libNeutrino.a
-EXAMPLES = build/neutrino_demo build/neutrino_test_all_controls build/neutrino_test_windows build/neutrino_test_typed_views build/neutrino_test_smooth_graphics build/neutrino_test_treeview_collapse build/neutrino_test_heavy_data
+EXAMPLES = build/neutrino_demo \
+    build/neutrino_test_all_controls \
+    build/neutrino_test_windows \
+    build/neutrino_test_typed_views \
+    build/neutrino_test_smooth_graphics \
+    build/neutrino_test_treeview_collapse \
+    build/neutrino_test_heavy_data \
+    build/neutrino_test_01_buttons_icons \
+    build/neutrino_test_02_text_inputs \
+    build/neutrino_test_03_lists_combo_autoscroll \
+    build/neutrino_test_04_listview_typed_data \
+    build/neutrino_test_05_treeview_collapse \
+    build/neutrino_test_06_placement_layout_scaling \
+    build/neutrino_test_07_popup_menu_categories \
+    build/neutrino_test_08_richtext_code \
+    build/neutrino_test_09_readonly_richtext_icons \
+    build/neutrino_test_10_images_progress_labels \
+    build/neutrino_test_11_rendering_buffering \
+    build/neutrino_test_12_scroll_windows_heavy_data
 
 all: $(LIB) $(EXAMPLES)
 
@@ -44,6 +62,9 @@ build/%.o: src/%.cpp include/Neutrino/Neutrino.hpp | build
 
 $(LIB): $(OBJ)
 	$(AR) rcs $@ $^
+
+build/%: examples/%.cpp $(LIB)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(XFT_CPPFLAGS) $< $(LIB) $(LDFLAGS) -o $@
 
 build/neutrino_demo: examples/demo.cpp $(LIB)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(XFT_CPPFLAGS) $< $(LIB) $(LDFLAGS) -o $@
@@ -57,17 +78,16 @@ build/neutrino_test_windows: examples/test_windows.cpp $(LIB)
 build/neutrino_test_typed_views: examples/test_typed_views.cpp $(LIB)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(XFT_CPPFLAGS) $< $(LIB) $(LDFLAGS) -o $@
 
-clean:
-	rm -rf build
-
-.PHONY: all clean
-
 build/neutrino_test_smooth_graphics: examples/test_smooth_graphics.cpp $(LIB)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(XFT_CPPFLAGS) $< $(LIB) $(LDFLAGS) -o $@
 
 build/neutrino_test_treeview_collapse: examples/test_treeview_collapse.cpp $(LIB)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(XFT_CPPFLAGS) $< $(LIB) $(LDFLAGS) -o $@
 
-
 build/neutrino_test_heavy_data: examples/test_heavy_data.cpp $(LIB)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(XFT_CPPFLAGS) $< $(LIB) $(LDFLAGS) -o $@
+
+clean:
+	rm -rf build
+
+.PHONY: all clean

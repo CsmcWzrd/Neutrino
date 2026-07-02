@@ -1,4 +1,4 @@
-AC_INIT([Neutrino], [0.2.1], [support@example.invalid])
+AC_INIT([Neutrino], [0.3.0], [support@example.invalid])
 AC_CONFIG_SRCDIR([src/Neu_Application.cpp])
 AC_CONFIG_HEADERS([config.h])
 AC_PROG_CXX
