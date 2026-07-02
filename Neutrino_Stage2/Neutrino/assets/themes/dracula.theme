@@ -1,0 +1,9 @@
+# Neutrino proprietary theme asset: dracula
+name=dracula
+background=#282A36
+glass=#44475A
+border=#6272A4
+text=#F8F8F2
+accent=#BD93F9
+hover=#3A3C4E
+pressed=#50536B

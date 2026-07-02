@@ -1,0 +1,9 @@
+# Neutrino proprietary theme asset: material_dark
+name=material_dark
+background=#121212
+glass=#1E1E1E
+border=#333333
+text=#EEEEEE
+accent=#90CAF9
+hover=#2A2A2A
+pressed=#383838

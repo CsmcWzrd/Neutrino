@@ -1,0 +1,9 @@
+# Neutrino proprietary theme asset: win10
+name=win10
+background=#F3F3F3
+glass=#FFFFFF
+border=#D0D0D0
+text=#202020
+accent=#0078D7
+hover=#E5F3FF
+pressed=#CCE8FF

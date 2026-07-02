@@ -1,0 +1,9 @@
+# Neutrino proprietary theme asset: winxp
+name=winxp
+background=#ECE9D8
+glass=#FFFFFF
+border=#7F9DB9
+text=#000000
+accent=#316AC5
+hover=#D6E8FF
+pressed=#C7D8ED
