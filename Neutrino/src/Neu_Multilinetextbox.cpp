@@ -7,36 +7,40 @@ void Neu_Multilinetextbox::draw(Display* display, Drawable drawable, GC gc, cons
 {
     Neu_Control::draw(display, drawable, gc, theme);
     const auto rect = bounds();
+    Neu_Rect content{rect.x + 8, rect.y + 6, rect.width - 20, rect.height - 18};
+    drawTextInRect(display,
+                   drawable,
+                   gc,
+                   theme,
+                   text_,
+                   Neu_Rect{content.x - scrollX_, content.y - scrollY_, content.width + scrollX_, content.height + scrollY_},
+                   Neu_TextLayoutOptions{wordWrap_, truncateText_, textAlign_, 18, 0});
+
+    int lineCount = 1;
+    int maxLineWidth = rect.width;
     std::stringstream stream(text_);
     std::string line;
-    int y = rect.y + 18 - scrollY();
-    int count = 0;
-
     while (std::getline(stream, line)) {
-        if (y >= rect.y + 12 && y < rect.y + rect.height) {
-            drawText(display, drawable, gc, theme, line, rect.x + 8 - scrollX(), y);
-        }
-        y += 16;
-        ++count;
+        ++lineCount;
+        maxLineWidth = std::max(maxLineWidth, approximateTextWidth(line) + 32);
     }
-    setVirtualSize(std::max(rect.width, 800), std::max(rect.height, count * 16 + 12));
+    if (wordWrap_) {
+        auto wrapped = wrapTextToWidth(text_, rect.width - 24);
+        lineCount = static_cast<int>(wrapped.size());
+        maxLineWidth = rect.width;
+    }
+    setAutoScroll(true);
+    setVirtualSize(std::max(rect.width, maxLineWidth), std::max(rect.height, lineCount * 18 + 20));
     drawScrollbars(display, drawable, gc, theme);
-
-    if (focused_) {
-        XSetForeground(display, gc, Neu_Pixel(display, theme.accent));
-        XDrawLine(display, drawable, gc, rect.x + 8, rect.y + rect.height - 10, rect.x + 20, rect.y + rect.height - 10);
-    }
 }
 
 void Neu_Multilinetextbox::handleXEvent(XEvent& event)
 {
     if (event.type == KeyPress && focused_ && XLookupKeysym(&event.xkey, 0) == XK_Return) {
-        const size_t insertAt = std::min(cursor_, text_.size());
-        text_.insert(insertAt, 1, '\n');
-        cursor_ = insertAt + 1;
+        text_.insert(cursor_, "\n");
+        ++cursor_;
         invokeTextChanged();
         requestRedraw();
-        Neu_Control::handleXEvent(event);
         return;
     }
 

@@ -32,25 +32,8 @@ SRC = src/Neu_Application.cpp \
     src/Neu_Window.cpp
 OBJ = $(SRC:src/%.cpp=build/%.o)
 LIB = build/libNeutrino.a
-EXAMPLES = build/neutrino_demo \
-    build/neutrino_test_all_controls \
-    build/neutrino_test_windows \
-    build/neutrino_test_typed_views \
-    build/neutrino_test_smooth_graphics \
-    build/neutrino_test_treeview_collapse \
-    build/neutrino_test_heavy_data \
-    build/neutrino_test_01_buttons_icons \
-    build/neutrino_test_02_text_inputs \
-    build/neutrino_test_03_lists_combo_autoscroll \
-    build/neutrino_test_04_listview_typed_data \
-    build/neutrino_test_05_treeview_collapse \
-    build/neutrino_test_06_placement_layout_scaling \
-    build/neutrino_test_07_popup_menu_categories \
-    build/neutrino_test_08_richtext_code \
-    build/neutrino_test_09_readonly_richtext_icons \
-    build/neutrino_test_10_images_progress_labels \
-    build/neutrino_test_11_rendering_buffering \
-    build/neutrino_test_12_scroll_windows_heavy_data
+EXAMPLE_SOURCES = examples/demo.cpp examples/neutrino_test_01_buttons_icons.cpp examples/neutrino_test_02_text_inputs.cpp examples/neutrino_test_03_lists_combo_autoscroll.cpp examples/neutrino_test_04_listview_typed_data.cpp examples/neutrino_test_05_treeview_collapse.cpp examples/neutrino_test_06_placement_layout_scaling.cpp examples/neutrino_test_07_popup_menu_categories.cpp examples/neutrino_test_08_richtext_code.cpp examples/neutrino_test_09_readonly_richtext_icons.cpp examples/neutrino_test_10_images_progress_labels.cpp examples/neutrino_test_11_rendering_buffering.cpp examples/neutrino_test_12_scroll_windows_heavy_data.cpp examples/test_all_controls.cpp examples/test_heavy_data.cpp examples/test_progress_square.cpp examples/test_readonly_richtext_spacing.cpp examples/test_richtext_formatting.cpp examples/test_scroll_clip_select.cpp examples/test_smooth_graphics.cpp examples/test_treeview_collapse.cpp examples/test_typed_views.cpp examples/test_windows.cpp examples/test_wordwrap_hints.cpp
+EXAMPLES = $(patsubst examples/%.cpp,build/%,$(EXAMPLE_SOURCES))
 
 all: $(LIB) $(EXAMPLES)
 
@@ -64,27 +47,6 @@ $(LIB): $(OBJ)
 	$(AR) rcs $@ $^
 
 build/%: examples/%.cpp $(LIB)
-	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(XFT_CPPFLAGS) $< $(LIB) $(LDFLAGS) -o $@
-
-build/neutrino_demo: examples/demo.cpp $(LIB)
-	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(XFT_CPPFLAGS) $< $(LIB) $(LDFLAGS) -o $@
-
-build/neutrino_test_all_controls: examples/test_all_controls.cpp $(LIB)
-	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(XFT_CPPFLAGS) $< $(LIB) $(LDFLAGS) -o $@
-
-build/neutrino_test_windows: examples/test_windows.cpp $(LIB)
-	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(XFT_CPPFLAGS) $< $(LIB) $(LDFLAGS) -o $@
-
-build/neutrino_test_typed_views: examples/test_typed_views.cpp $(LIB)
-	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(XFT_CPPFLAGS) $< $(LIB) $(LDFLAGS) -o $@
-
-build/neutrino_test_smooth_graphics: examples/test_smooth_graphics.cpp $(LIB)
-	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(XFT_CPPFLAGS) $< $(LIB) $(LDFLAGS) -o $@
-
-build/neutrino_test_treeview_collapse: examples/test_treeview_collapse.cpp $(LIB)
-	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(XFT_CPPFLAGS) $< $(LIB) $(LDFLAGS) -o $@
-
-build/neutrino_test_heavy_data: examples/test_heavy_data.cpp $(LIB)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(XFT_CPPFLAGS) $< $(LIB) $(LDFLAGS) -o $@
 
 clean:

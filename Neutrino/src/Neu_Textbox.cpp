@@ -7,21 +7,33 @@ void Neu_Textbox::draw(Display* display, Drawable drawable, GC gc, const Neu_The
 {
     Neu_Control::draw(display, drawable, gc, theme);
     const auto rect = bounds();
-    const int textX = rect.x + 8;
-    const int textY = rect.y + rect.height / 2 + 5;
-    drawText(display, drawable, gc, theme, text_, textX, textY);
-
+    const int pad = 8;
+    Neu_Rect textRect{rect.x + pad, rect.y + 3, rect.width - 2 * pad, rect.height - 6};
+    drawTextInRect(display,
+                   drawable,
+                   gc,
+                   theme,
+                   text_,
+                   textRect,
+                   Neu_TextLayoutOptions{false, true, Neu_TextAlign::Left, 18, 0});
     if (focused_) {
-        const int caretX = textX + static_cast<int>(std::min<size_t>(cursor_, text_.size())) * 8;
+        const int caretX = std::min(textRect.x + textRect.width - 1,
+                                    textRect.x + approximateTextWidth(text_.substr(0, cursor_)) - scrollX_);
         XSetForeground(display, gc, Neu_Pixel(display, theme.accent));
-        XDrawLine(display, drawable, gc, caretX, rect.y + 8, caretX, rect.y + rect.height - 8);
+        XDrawLine(display, drawable, gc, caretX, rect.y + 6, caretX, rect.y + rect.height - 7);
     }
 }
 
 void Neu_Textbox::handleXEvent(XEvent& event)
 {
-    if (event.type == ButtonPress && contains(event.xbutton.x, event.xbutton.y)) {
-        cursor_ = text_.size();
+    if (event.type == ButtonPress) {
+        focused_ = contains(event.xbutton.x, event.xbutton.y);
+        if (focused_) {
+            const auto rect = bounds();
+            const int localX = std::max(0, event.xbutton.x - rect.x - 8 + scrollX_);
+            cursor_ = std::min(text_.size(), static_cast<size_t>(localX / 7));
+        }
+        requestRedraw();
     }
 
     if (event.type == KeyPress && focused_) {
@@ -53,7 +65,6 @@ void Neu_Textbox::handleXEvent(XEvent& event)
         } else if (keySymbol == XK_End) {
             cursor_ = text_.size();
         } else if (keySymbol == XK_Return) {
-            // Single-line text boxes ignore Enter. Multiline boxes override this.
         } else if (count > 0 && buffer[0] >= 32) {
             text_.insert(cursor_, buffer, static_cast<size_t>(count));
             cursor_ += static_cast<size_t>(count);

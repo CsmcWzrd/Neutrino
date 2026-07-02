@@ -1,0 +1,9 @@
+Neutrino Proprietary Notice
+===========================
+
+This source package is proprietary and all rights are reserved by the project owner.
+No open-source license, public-domain dedication, redistribution grant,
+sublicensing grant, or commercial-use grant is included in this package.
+
+Possession of the source archive does not grant any license rights beyond the
+permissions separately granted in writing by the project owner.
