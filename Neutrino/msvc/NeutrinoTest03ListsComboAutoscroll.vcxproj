@@ -7,8 +7,8 @@
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
-    <ProjectGuid>{91CCE4BD-ED13-5D1E-8DF7-537AAEEA184A}</ProjectGuid>
-    <RootNamespace>NeutrinoTest01ButtonsIcons</RootNamespace>
+    <ProjectGuid>{6B847C6F-69A5-53D7-884E-8AA69D4064A9}</ProjectGuid>
+    <RootNamespace>NeutrinoTest03ListsComboAutoscroll</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -75,7 +75,7 @@
     <ClInclude Include="..\examples/common/Neu_TestCommon.hpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="..\examples/neutrino_test_01_buttons_icons.cpp" />
+    <ClCompile Include="..\examples/neutrino_test_03_lists_combo_autoscroll.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

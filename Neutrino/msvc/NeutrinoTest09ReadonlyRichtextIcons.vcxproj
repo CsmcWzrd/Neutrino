@@ -7,8 +7,8 @@
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
-    <ProjectGuid>{91CCE4BD-ED13-5D1E-8DF7-537AAEEA184A}</ProjectGuid>
-    <RootNamespace>NeutrinoTest01ButtonsIcons</RootNamespace>
+    <ProjectGuid>{5A96F98A-44A6-5EE8-9173-E309DBCC0702}</ProjectGuid>
+    <RootNamespace>NeutrinoTest09ReadonlyRichtextIcons</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -75,7 +75,7 @@
     <ClInclude Include="..\examples/common/Neu_TestCommon.hpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="..\examples/neutrino_test_01_buttons_icons.cpp" />
+    <ClCompile Include="..\examples/neutrino_test_09_readonly_richtext_icons.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>
