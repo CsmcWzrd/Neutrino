@@ -514,3 +514,13 @@ Added full-window test applications for rich text editing and rich text code edi
 ## Stage2 text navigation and selection update
 
 See `STAGE2_TEXT_NAV_SELECTION_FIXES.md` for the multiline/rich-text cursor movement and selection highlight fix pass.
+
+## Stage2 rich text selection/formatting fix
+
+The rich text toolbar now formats only the active selection. If no selection is active, it formats the current word at the caret. It no longer applies bold/italic/etc. to the entire control by default. Rich text and rich text code selection highlight rectangles are also aligned with the actual selected text row.
+
+See `STAGE2_RICHTEXT_SELECTION_FORMATTING_FIXES.md`.
+
+### Stage2 rich text inline/toggle formatting fixes
+
+The latest Stage2 package fixes rich text/rich text code selection drift after the first few lines by using the same styled-line model for drawing and mouse hit-testing. Toolbar formatting now toggles on/off for the selected span, or the current word when there is no selection, without forcing the whole control to change. Styled fragments now remain inline unless the text itself contains a newline. MaterialDark toolbar symbols are drawn in black for better contrast.

@@ -377,6 +377,257 @@ static int lineHeightForHeadingWin32(int headingLevel)
 }
 
 
+static bool richWordCharWin32(unsigned char ch)
+{
+    return std::isalnum(ch) != 0 || ch == '_';
+}
+
+static std::pair<size_t, size_t> richToolbarTargetRangeWin32(const std::string& text,
+                                                             size_t cursor,
+                                                             bool hasSelection,
+                                                             size_t selectionStart,
+                                                             size_t selectionEnd)
+{
+    if (hasSelection && selectionStart != selectionEnd) {
+        const size_t a = std::min(selectionStart, selectionEnd);
+        const size_t b = std::max(selectionStart, selectionEnd);
+        return {std::min(a, text.size()), std::min(b, text.size())};
+    }
+
+    if (text.empty()) {
+        return {0, 0};
+    }
+
+    size_t pos = std::min(cursor, text.size());
+    if (pos == text.size() || !richWordCharWin32(static_cast<unsigned char>(text[pos]))) {
+        if (pos > 0 && richWordCharWin32(static_cast<unsigned char>(text[pos - 1]))) {
+            --pos;
+        }
+    }
+
+    if (pos >= text.size() || !richWordCharWin32(static_cast<unsigned char>(text[pos]))) {
+        return {cursor, cursor};
+    }
+
+    size_t a = pos;
+    while (a > 0 && richWordCharWin32(static_cast<unsigned char>(text[a - 1]))) {
+        --a;
+    }
+    size_t b = pos;
+    while (b < text.size() && richWordCharWin32(static_cast<unsigned char>(text[b]))) {
+        ++b;
+    }
+    return {a, b};
+}
+
+static bool sameColorWin32(const Neu_Color& a, const Neu_Color& b)
+{
+    return a.r == b.r && a.g == b.g && a.b == b.b && a.a == b.a;
+}
+
+static bool styleEquivalentWin32(const Neu_TextFragment& a, const Neu_TextFragment& b)
+{
+    return a.bold == b.bold &&
+           a.italic == b.italic &&
+           a.underline == b.underline &&
+           a.strikethrough == b.strikethrough &&
+           a.doubleStrikethrough == b.doubleStrikethrough &&
+           a.monospace == b.monospace &&
+           a.headingLevel == b.headingLevel &&
+           a.fontName == b.fontName &&
+           a.useFontColor == b.useFontColor &&
+           (!a.useFontColor || sameColorWin32(a.fontColor, b.fontColor)) &&
+           a.useBackgroundColor == b.useBackgroundColor &&
+           (!a.useBackgroundColor || sameColorWin32(a.backgroundColor, b.backgroundColor)) &&
+           a.useHighlightColor == b.useHighlightColor &&
+           (!a.useHighlightColor || sameColorWin32(a.highlightColor, b.highlightColor));
+}
+
+static Neu_TextFragment defaultTextFragmentWin32(const std::string& text, const Neu_Color& color)
+{
+    Neu_TextFragment f;
+    f.text = text;
+    f.useFontColor = true;
+    f.fontColor = color;
+    return f;
+}
+
+static std::vector<Neu_TextFragment> normalizedFragmentsWin32(const std::string& text,
+                                                             const std::vector<Neu_TextFragment>& fragments,
+                                                             const Neu_Color& color)
+{
+    if (fragments.empty()) {
+        return {defaultTextFragmentWin32(text, color)};
+    }
+    size_t total = 0;
+    for (const auto& f : fragments) {
+        total += f.text.size();
+    }
+    if (total != text.size()) {
+        return {defaultTextFragmentWin32(text, color)};
+    }
+    return fragments;
+}
+
+static void appendMergedFragmentWin32(std::vector<Neu_TextFragment>& out, const Neu_TextFragment& fragment)
+{
+    if (fragment.text.empty()) {
+        return;
+    }
+    if (!out.empty() && styleEquivalentWin32(out.back(), fragment)) {
+        out.back().text += fragment.text;
+    } else {
+        out.push_back(fragment);
+    }
+}
+
+static Neu_TextFragment toggledStyleWin32(Neu_TextFragment current, const Neu_TextFragment& requested)
+{
+    if (requested.bold) current.bold = !current.bold;
+    if (requested.italic) current.italic = !current.italic;
+    if (requested.underline) current.underline = !current.underline;
+    if (requested.strikethrough) current.strikethrough = !current.strikethrough;
+    if (requested.doubleStrikethrough) current.doubleStrikethrough = !current.doubleStrikethrough;
+    if (requested.monospace || !requested.fontName.empty()) {
+        const bool sameFont = current.fontName == requested.fontName && current.monospace == requested.monospace;
+        if (sameFont) {
+            current.fontName.clear();
+            current.monospace = false;
+        } else {
+            current.fontName = requested.fontName;
+            current.monospace = requested.monospace;
+        }
+    }
+    if (requested.headingLevel > 0) {
+        current.headingLevel = current.headingLevel == requested.headingLevel ? 0 : requested.headingLevel;
+    }
+    if (requested.useFontColor) {
+        if (current.useFontColor && sameColorWin32(current.fontColor, requested.fontColor)) current.useFontColor = false;
+        else { current.useFontColor = true; current.fontColor = requested.fontColor; }
+    }
+    if (requested.useBackgroundColor) {
+        if (current.useBackgroundColor && sameColorWin32(current.backgroundColor, requested.backgroundColor)) current.useBackgroundColor = false;
+        else { current.useBackgroundColor = true; current.backgroundColor = requested.backgroundColor; }
+    }
+    if (requested.useHighlightColor) {
+        if (current.useHighlightColor && sameColorWin32(current.highlightColor, requested.highlightColor)) current.useHighlightColor = false;
+        else { current.useHighlightColor = true; current.highlightColor = requested.highlightColor; }
+    }
+    return current;
+}
+
+struct StyledRunWin32 {
+    size_t start{0};
+    size_t end{0};
+    std::string text;
+    Neu_TextFragment style;
+};
+
+struct StyledLineWin32 {
+    std::vector<StyledRunWin32> runs;
+    size_t start{0};
+    size_t end{0};
+    int height{20};
+};
+
+static std::vector<StyledLineWin32> buildStyledLinesWin32(const std::string& text,
+                                                         const std::vector<Neu_TextFragment>& fragments,
+                                                         const Neu_Color& color)
+{
+    std::vector<StyledLineWin32> lines;
+    StyledLineWin32 current;
+    size_t global = 0;
+    for (auto fragment : normalizedFragmentsWin32(text, fragments, color)) {
+        if (!fragment.useFontColor) { fragment.useFontColor = true; fragment.fontColor = color; }
+        size_t segmentStart = 0;
+        for (size_t i = 0; i < fragment.text.size(); ++i) {
+            const char ch = fragment.text[i];
+            if (ch != '\n' && ch != '\r') {
+                continue;
+            }
+            if (i > segmentStart) {
+                Neu_TextFragment styled = fragment;
+                styled.text = fragment.text.substr(segmentStart, i - segmentStart);
+                StyledRunWin32 run{global + segmentStart, global + i, styled.text, styled};
+                current.runs.push_back(run);
+                current.end = run.end;
+                current.height = std::max(current.height, lineHeightForHeadingWin32(styled.headingLevel));
+            }
+            lines.push_back(current);
+            current = StyledLineWin32{};
+            if (ch == '\r' && i + 1 < fragment.text.size() && fragment.text[i + 1] == '\n') { ++i; }
+            current.start = global + i + 1;
+            current.end = current.start;
+            segmentStart = i + 1;
+        }
+        if (segmentStart < fragment.text.size()) {
+            Neu_TextFragment styled = fragment;
+            styled.text = fragment.text.substr(segmentStart);
+            StyledRunWin32 run{global + segmentStart, global + fragment.text.size(), styled.text, styled};
+            current.runs.push_back(run);
+            current.end = run.end;
+            current.height = std::max(current.height, lineHeightForHeadingWin32(styled.headingLevel));
+        }
+        global += fragment.text.size();
+    }
+    lines.push_back(current);
+    if (lines.empty()) { lines.push_back(StyledLineWin32{}); }
+    return lines;
+}
+
+static int styledRunWidthWin32(HDC hdc, const StyledRunWin32& run, const std::string& text)
+{
+    if (!hdc) {
+        int base = run.style.monospace ? 8 : 7;
+        if (run.style.headingLevel > 0) base += std::max(1, 8 - run.style.headingLevel);
+        if (run.style.bold) ++base;
+        return static_cast<int>(text.size()) * base;
+    }
+    HFONT font = createTextFont(run.style.bold, run.style.italic, run.style.underline, run.style.strikethrough || run.style.doubleStrikethrough, run.style.monospace, run.style.headingLevel);
+    HGDIOBJ old = SelectObject(hdc, font ? font : uiFont());
+    std::wstring wide = toWide(text);
+    SIZE sz{};
+    GetTextExtentPoint32W(hdc, wide.c_str(), static_cast<int>(wide.size()), &sz);
+    SelectObject(hdc, old);
+    if (font) DeleteObject(font);
+    return sz.cx;
+}
+
+static size_t richCursorFromPointWin32(HDC hdc,
+                                      const std::string& text,
+                                      const std::vector<Neu_TextFragment>& fragments,
+                                      const Neu_Color& defaultColor,
+                                      int localX,
+                                      int localY)
+{
+    const auto lines = buildStyledLinesWin32(text, fragments, defaultColor);
+    int y = 0;
+    for (const auto& line : lines) {
+        const int h = std::max(20, line.height);
+        if (localY < y + h) {
+            int x = 0;
+            for (const auto& run : line.runs) {
+                const int w = styledRunWidthWin32(hdc, run, run.text);
+                if (localX <= x + w) {
+                    size_t cursor = run.start;
+                    for (size_t i = 1; i <= run.text.size(); ++i) {
+                        const int prefixWidth = styledRunWidthWin32(hdc, run, run.text.substr(0, i));
+                        if (x + prefixWidth <= localX) cursor = run.start + i;
+                        else break;
+                    }
+                    return cursor;
+                }
+                x += w;
+            }
+            return line.end;
+        }
+        y += h;
+    }
+    return text.size();
+}
+
+
+
 static int uiFontPixelHeightWin32(HDC hdc, bool bold = false, bool italic = false, bool monospace = false, int headingLevel = 0)
 {
     if (!hdc) {
@@ -3819,40 +4070,54 @@ void Neu_RichTextCode::applyHighlightColor(const Neu_Color& color)
 
 void Neu_RichTextCode::applyFragmentStyleToSelection(const Neu_TextFragment& style)
 {
-    const size_t a = hasSelection() ? selectionStart() : 0;
-    const size_t b = hasSelection() ? selectionEnd() : text_.size();
+    const auto target = richToolbarTargetRangeWin32(text_, cursor_, hasSelection(), selectionStart_, selectionEnd_);
+    const size_t a = target.first;
+    const size_t b = target.second;
     if (text_.empty() || a >= b || b > text_.size()) {
         return;
     }
+
     pushUndoSnapshot();
-    std::vector<Neu_TextFragment> fragments;
-    if (a > 0) {
-        Neu_TextFragment before;
-        before.text = text_.substr(0, a);
-        before.useFontColor = true;
-        before.fontColor = defaultFontColor_;
-        fragments.push_back(before);
+    std::vector<Neu_TextFragment> result;
+    size_t base = 0;
+    const auto fragments = normalizedFragmentsWin32(text_, richTextFragments_, defaultFontColor_);
+    for (auto fragment : fragments) {
+        if (!fragment.useFontColor) {
+            fragment.useFontColor = true;
+            fragment.fontColor = defaultFontColor_;
+        }
+        const size_t fragStart = base;
+        const size_t fragEnd = base + fragment.text.size();
+        if (fragEnd <= a || fragStart >= b) {
+            appendMergedFragmentWin32(result, fragment);
+            base = fragEnd;
+            continue;
+        }
+        const size_t localA = a > fragStart ? a - fragStart : 0;
+        const size_t localB = std::min(b, fragEnd) - fragStart;
+        if (localA > 0) {
+            Neu_TextFragment before = fragment;
+            before.text = fragment.text.substr(0, localA);
+            appendMergedFragmentWin32(result, before);
+        }
+        if (localB > localA) {
+            Neu_TextFragment middle = toggledStyleWin32(fragment, style);
+            middle.text = fragment.text.substr(localA, localB - localA);
+            appendMergedFragmentWin32(result, middle);
+        }
+        if (localB < fragment.text.size()) {
+            Neu_TextFragment after = fragment;
+            after.text = fragment.text.substr(localB);
+            appendMergedFragmentWin32(result, after);
+        }
+        base = fragEnd;
     }
-    Neu_TextFragment selected = style;
-    selected.text = text_.substr(a, b - a);
-    if (!selected.useFontColor) {
-        selected.useFontColor = true;
-        selected.fontColor = defaultFontColor_;
-    }
-    if (!selected.fontName.empty()) {
-        selected.monospace = selected.fontName.find("Mono") != std::string::npos || selected.fontName.find("mono") != std::string::npos;
-    }
-    fragments.push_back(selected);
-    if (b < text_.size()) {
-        Neu_TextFragment after;
-        after.text = text_.substr(b);
-        after.useFontColor = true;
-        after.fontColor = defaultFontColor_;
-        fragments.push_back(after);
-    }
-    richTextFragments_ = fragments;
+    richTextFragments_ = result;
+    clearSelection();
+    cursor_ = b;
     requestRedraw();
 }
+
 
 void Neu_RichTextCode::applyToolbarAction(int actionIndex)
 {
@@ -3898,7 +4163,7 @@ void Neu_RichTextCode::draw(Display* d, Drawable drawable, GC gc, const Neu_Them
         for (const char* tool : tools) {
             RECT br{tx, r.y + 7, tx + 42, r.y + 27};
             FrameRect(drawable, &br, reinterpret_cast<HBRUSH>(GetStockObject(GRAY_BRUSH)));
-            drawText(d, drawable, gc, theme, tool, tx + 4, r.y + 9);
+            drawTextColored(d, drawable, gc, theme, tool, tx + 4, r.y + 9, Neu_Color{0, 0, 0, 255});
             tx += 46;
             if (tx > r.x + r.width - 50) {
                 break;
@@ -3944,7 +4209,7 @@ void Neu_RichTextCode::draw(Display* d, Drawable drawable, GC gc, const Neu_Them
                 IntersectClipRect(drawable, contentLeft, contentTop, contentRight, contentBottom);
                 if (fragment && fragment->useHighlightColor) {
                     HBRUSH hb = CreateSolidBrush(rgb(fragment->highlightColor));
-                    RECT hr{contentLeft - scrollX(), y - lineHeight + 5, std::min(contentRight, contentLeft - scrollX() + measured + 4), y + 4};
+                    RECT hr{contentLeft - scrollX(), y + 1, std::min(contentRight, contentLeft - scrollX() + measured + 4), std::min(contentBottom, y + lineHeight - 1)};
                     FillRect(drawable, &hr, hb);
                     DeleteObject(hb);
                 }
@@ -3956,7 +4221,7 @@ void Neu_RichTextCode::draw(Display* d, Drawable drawable, GC gc, const Neu_Them
                         const size_t localB = std::min(selB, lineEndOffset) - lineStartOffset;
                         const int sx = contentLeft - scrollX_ + measureTextWidth(d, drawable, gc, theme, line.substr(0, localA), false, false, true);
                         const int ex = contentLeft - scrollX_ + measureTextWidth(d, drawable, gc, theme, line.substr(0, localB), false, false, true);
-                        RECT sr{std::min(sx, ex), y - lineHeight + 5, std::max(sx, ex), y + 4};
+                        RECT sr{std::min(sx, ex), y + 1, std::max(sx, ex), std::min(contentBottom, y + lineHeight - 1)};
                         HBRUSH sb = CreateSolidBrush(rgb(theme.highlight));
                         FillRect(drawable, &sr, sb);
                         DeleteObject(sb);
@@ -3975,25 +4240,55 @@ void Neu_RichTextCode::draw(Display* d, Drawable drawable, GC gc, const Neu_Them
     };
 
     if (!richTextFragments().empty()) {
-        size_t fragmentBase = 0;
-        for (const auto& f : richTextFragments()) {
-            const auto fragmentLines = logicalLinesWin32(f.text);
-            const int lineHeight = lineHeightForHeadingWin32(f.headingLevel);
-            size_t localOffset = 0;
-            for (const auto& line : fragmentLines) {
-                const size_t start = fragmentBase + localOffset;
-                const size_t end = std::min(text_.size(), start + line.size());
-                drawCodeLine(line, &f, lineHeight, logicalLineNo++, start, end);
-                localOffset += line.size();
-                if (localOffset < f.text.size()) {
-                    if (f.text[localOffset] == '\r' && localOffset + 1 < f.text.size() && f.text[localOffset + 1] == '\n') {
-                        localOffset += 2;
-                    } else if (f.text[localOffset] == '\r' || f.text[localOffset] == '\n') {
-                        ++localOffset;
+        const auto styledLines = buildStyledLinesWin32(text_, richTextFragments_, defaultFontColor_);
+        for (const auto& styledLine : styledLines) {
+            const int lineHeight = std::max(20, styledLine.height);
+            const bool visibleY = y >= contentTop && y < contentBottom;
+            if (visibleY) {
+                drawText(d, drawable, gc, theme, std::to_string(logicalLineNo), r.x + 8, y);
+                int textSaved = SaveDC(drawable);
+                IntersectClipRect(drawable, contentLeft, contentTop, contentRight, contentBottom);
+                int x = contentLeft - (wordWrap_ ? 0 : scrollX());
+                for (const auto& run : styledLine.runs) {
+                    const int measured = styledRunWidthWin32(drawable, run, run.text);
+                    maxWidth = std::max(maxWidth, x - contentLeft + scrollX() + measured + 82);
+                    if (run.style.useHighlightColor || run.style.useBackgroundColor) {
+                        HBRUSH hb = CreateSolidBrush(rgb(run.style.useHighlightColor ? run.style.highlightColor : run.style.backgroundColor));
+                        RECT hr{x, y + 1, std::min(contentRight, x + measured + 4), std::min(contentBottom, y + lineHeight - 1)};
+                        FillRect(drawable, &hr, hb);
+                        DeleteObject(hb);
                     }
+                    if (focused_ && hasSelection() && selectionEnd() > run.start && selectionStart() < run.end) {
+                        const size_t localA = std::max(selectionStart(), run.start) - run.start;
+                        const size_t localB = std::min(selectionEnd(), run.end) - run.start;
+                        const int sx = x + styledRunWidthWin32(drawable, run, run.text.substr(0, std::min(localA, run.text.size())));
+                        const int ex = x + styledRunWidthWin32(drawable, run, run.text.substr(0, std::min(localB, run.text.size())));
+                        RECT sr{std::min(sx, ex), y + 1, std::max(sx, ex), std::min(contentBottom, y + lineHeight - 1)};
+                        HBRUSH sb = CreateSolidBrush(rgb(theme.highlight));
+                        FillRect(drawable, &sr, sb);
+                        DeleteObject(sb);
+                    }
+                    drawTextColored(d,
+                                    drawable,
+                                    gc,
+                                    theme,
+                                    run.text,
+                                    x,
+                                    y,
+                                    run.style.useFontColor ? run.style.fontColor : defaultFontColor_,
+                                    run.style.bold,
+                                    run.style.italic,
+                                    run.style.underline,
+                                    run.style.strikethrough,
+                                    run.style.doubleStrikethrough,
+                                    run.style.monospace,
+                                    run.style.headingLevel);
+                    x += measured;
                 }
+                RestoreDC(drawable, textSaved);
             }
-            fragmentBase += f.text.size();
+            y += lineHeight;
+            ++logicalLineNo;
         }
     } else {
         const auto lines = logicalLinesWin32(text_);
@@ -4006,17 +4301,45 @@ void Neu_RichTextCode::draw(Display* d, Drawable drawable, GC gc, const Neu_Them
 
     if (!readOnly_ && focused_) {
         const size_t caretBytes = std::min(cursor_, text_.size());
-        size_t lineIndex = 0;
-        size_t lineStart = 0;
-        caretLinePrefixWin32(text_, caretBytes, lineIndex, lineStart);
-        const std::string prefix = text_.substr(lineStart, caretBytes - lineStart);
-        const int caretX = contentLeft + measureTextWidth(d, drawable, gc, theme, prefix, false, false, true) - (wordWrap_ ? 0 : scrollX());
-        const int caretY = contentTop + 2 + static_cast<int>(lineIndex) * 20 - scrollY();
+        int caretX = contentLeft - (wordWrap_ ? 0 : scrollX());
+        int caretY = contentTop + 2 - scrollY();
+        int caretHeight = 20;
+        bool caretResolved = false;
+        if (!richTextFragments().empty()) {
+            const auto styledLines = buildStyledLinesWin32(text_, richTextFragments_, defaultFontColor_);
+            for (const auto& styledLine : styledLines) {
+                const int lineHeight = std::max(20, styledLine.height);
+                if (caretBytes >= styledLine.start && caretBytes <= styledLine.end) {
+                    int x = contentLeft - (wordWrap_ ? 0 : scrollX());
+                    for (const auto& run : styledLine.runs) {
+                        if (caretBytes >= run.start && caretBytes <= run.end) {
+                            caretX = x + styledRunWidthWin32(drawable, run, run.text.substr(0, caretBytes - run.start));
+                            break;
+                        }
+                        x += styledRunWidthWin32(drawable, run, run.text);
+                        caretX = x;
+                    }
+                    caretHeight = lineHeight;
+                    caretResolved = true;
+                    break;
+                }
+                caretY += lineHeight;
+            }
+        }
+        if (!caretResolved) {
+            size_t lineIndex = 0;
+            size_t lineStart = 0;
+            caretLinePrefixWin32(text_, caretBytes, lineIndex, lineStart);
+            const std::string prefix = text_.substr(lineStart, caretBytes - lineStart);
+            caretX = contentLeft + measureTextWidth(d, drawable, gc, theme, prefix, false, false, true) - (wordWrap_ ? 0 : scrollX());
+            caretY = contentTop + 2 + static_cast<int>(lineIndex) * 20 - scrollY();
+            caretHeight = uiFontPixelHeightWin32(drawable, false, false, true);
+        }
         if (caretY >= contentTop && caretY < contentBottom) {
             HPEN pen = CreatePen(PS_SOLID, 1, rgb(theme.focus));
             HGDIOBJ old = SelectObject(drawable, pen);
             const int caretTop = caretY;
-            const int caretBottom = std::min(contentBottom, caretY + uiFontPixelHeightWin32(drawable, false, false, true));
+            const int caretBottom = std::min(contentBottom, caretY + caretHeight);
             MoveToEx(drawable, caretX, caretTop, nullptr);
             LineTo(drawable, caretX, caretBottom);
             SelectObject(drawable, old);
@@ -4063,14 +4386,20 @@ void Neu_RichTextCode::handleXEvent(XEvent& ev)
         const int contentTop = r.y + toolbarH + 4;
         const int contentBottom = r.y + r.height - 14;
         if (ev.y >= contentTop && ev.y <= contentBottom) {
-            const int desiredLine = std::max(0, (ev.y - (contentTop + 2) + scrollY_) / lineHeight);
-            const auto lines = logicalLinesWin32(text_);
-            const int clampedLine = std::min(desiredLine, std::max(0, static_cast<int>(lines.size()) - 1));
-            const size_t start = lineStartOffsetWin32(text_, clampedLine);
-            const size_t end = lineEndOffsetWin32(text_, start);
             const int localX = ev.x - contentLeft + (wordWrap_ ? 0 : scrollX_);
+            const int localY = ev.y - (contentTop + 2) + scrollY_;
             HDC hdc = parent_ && parent_->xid() ? GetDC(parent_->xid()) : nullptr;
-            const size_t newCursor = static_cast<size_t>(byteOffsetFromXWin32(hdc, text_, start, end, localX, true));
+            size_t newCursor = 0;
+            if (!richTextFragments_.empty()) {
+                newCursor = richCursorFromPointWin32(hdc, text_, richTextFragments_, defaultFontColor_, localX, localY);
+            } else {
+                const int desiredLine = std::max(0, localY / lineHeight);
+                const auto lines = logicalLinesWin32(text_);
+                const int clampedLine = std::min(desiredLine, std::max(0, static_cast<int>(lines.size()) - 1));
+                const size_t start = lineStartOffsetWin32(text_, clampedLine);
+                const size_t end = lineEndOffsetWin32(text_, start);
+                newCursor = static_cast<size_t>(byteOffsetFromXWin32(hdc, text_, start, end, localX, true));
+            }
             if (hdc) {
                 ReleaseDC(parent_->xid(), hdc);
             }
@@ -4090,14 +4419,20 @@ void Neu_RichTextCode::handleXEvent(XEvent& ev)
         constexpr int lineHeight = 20;
         const int contentLeft = r.x + 56;
         const int contentTop = r.y + toolbarH + 4;
-        const int desiredLine = std::max(0, (ev.y - (contentTop + 2) + scrollY_) / lineHeight);
-        const auto lines = logicalLinesWin32(text_);
-        const int clampedLine = std::min(desiredLine, std::max(0, static_cast<int>(lines.size()) - 1));
-        const size_t start = lineStartOffsetWin32(text_, clampedLine);
-        const size_t end = lineEndOffsetWin32(text_, start);
         const int localX = ev.x - contentLeft + (wordWrap_ ? 0 : scrollX_);
+        const int localY = ev.y - (contentTop + 2) + scrollY_;
         HDC hdc = parent_ && parent_->xid() ? GetDC(parent_->xid()) : nullptr;
-        const size_t newCursor = static_cast<size_t>(byteOffsetFromXWin32(hdc, text_, start, end, localX, true));
+        size_t newCursor = 0;
+        if (!richTextFragments_.empty()) {
+            newCursor = richCursorFromPointWin32(hdc, text_, richTextFragments_, defaultFontColor_, localX, localY);
+        } else {
+            const int desiredLine = std::max(0, localY / lineHeight);
+            const auto lines = logicalLinesWin32(text_);
+            const int clampedLine = std::min(desiredLine, std::max(0, static_cast<int>(lines.size()) - 1));
+            const size_t start = lineStartOffsetWin32(text_, clampedLine);
+            const size_t end = lineEndOffsetWin32(text_, start);
+            newCursor = static_cast<size_t>(byteOffsetFromXWin32(hdc, text_, start, end, localX, true));
+        }
         if (hdc) {
             ReleaseDC(parent_->xid(), hdc);
         }

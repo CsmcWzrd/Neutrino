@@ -1,5 +1,9 @@
 #include "Neutrino/Neutrino.hpp"
 #include <X11/keysym.h>
+#include <algorithm>
+#include <cctype>
+#include <cstdlib>
+#include <cmath>
 
 namespace neutrino {
 
@@ -17,6 +21,49 @@ static int richLineHeight(const Neu_TextFragment& f)
         return std::max(22, 36 - f.headingLevel * 2);
     }
     return 18;
+}
+
+static bool richWordChar(unsigned char ch)
+{
+    return std::isalnum(ch) != 0 || ch == '_';
+}
+
+static std::pair<size_t, size_t> richToolbarTargetRange(const std::string& text,
+                                                        size_t cursor,
+                                                        bool hasSelection,
+                                                        size_t selectionStart,
+                                                        size_t selectionEnd)
+{
+    if (hasSelection && selectionStart != selectionEnd) {
+        const size_t a = std::min(selectionStart, selectionEnd);
+        const size_t b = std::max(selectionStart, selectionEnd);
+        return {std::min(a, text.size()), std::min(b, text.size())};
+    }
+
+    if (text.empty()) {
+        return {0, 0};
+    }
+
+    size_t pos = std::min(cursor, text.size());
+    if (pos == text.size() || !richWordChar(static_cast<unsigned char>(text[pos]))) {
+        if (pos > 0 && richWordChar(static_cast<unsigned char>(text[pos - 1]))) {
+            --pos;
+        }
+    }
+
+    if (pos >= text.size() || !richWordChar(static_cast<unsigned char>(text[pos]))) {
+        return {cursor, cursor};
+    }
+
+    size_t a = pos;
+    while (a > 0 && richWordChar(static_cast<unsigned char>(text[a - 1]))) {
+        --a;
+    }
+    size_t b = pos;
+    while (b < text.size() && richWordChar(static_cast<unsigned char>(text[b]))) {
+        ++b;
+    }
+    return {a, b};
 }
 
 static std::vector<std::string> splitPreserveLines(const std::string& text)
@@ -39,6 +86,233 @@ static std::vector<std::string> splitPreserveLines(const std::string& text)
         lines.push_back({});
     }
     return lines;
+}
+
+static bool styleEquivalent(const Neu_TextFragment& a, const Neu_TextFragment& b)
+{
+    return a.bold == b.bold &&
+           a.italic == b.italic &&
+           a.underline == b.underline &&
+           a.strikethrough == b.strikethrough &&
+           a.doubleStrikethrough == b.doubleStrikethrough &&
+           a.monospace == b.monospace &&
+           a.headingLevel == b.headingLevel &&
+           a.fontName == b.fontName &&
+           a.useFontColor == b.useFontColor &&
+           (!a.useFontColor || (a.fontColor.r == b.fontColor.r && a.fontColor.g == b.fontColor.g && a.fontColor.b == b.fontColor.b && a.fontColor.a == b.fontColor.a)) &&
+           a.useBackgroundColor == b.useBackgroundColor &&
+           (!a.useBackgroundColor || (a.backgroundColor.r == b.backgroundColor.r && a.backgroundColor.g == b.backgroundColor.g && a.backgroundColor.b == b.backgroundColor.b && a.backgroundColor.a == b.backgroundColor.a)) &&
+           a.useHighlightColor == b.useHighlightColor &&
+           (!a.useHighlightColor || (a.highlightColor.r == b.highlightColor.r && a.highlightColor.g == b.highlightColor.g && a.highlightColor.b == b.highlightColor.b && a.highlightColor.a == b.highlightColor.a));
+}
+
+static Neu_TextFragment defaultTextFragment(const std::string& text, const Neu_Color& defaultColor)
+{
+    Neu_TextFragment f;
+    f.text = text;
+    f.useFontColor = true;
+    f.fontColor = defaultColor;
+    return f;
+}
+
+static std::vector<Neu_TextFragment> normalizedFragments(const std::string& text,
+                                                         const std::vector<Neu_TextFragment>& fragments,
+                                                         const Neu_Color& defaultColor)
+{
+    if (fragments.empty()) {
+        return {defaultTextFragment(text, defaultColor)};
+    }
+    size_t total = 0;
+    for (const auto& f : fragments) {
+        total += f.text.size();
+    }
+    if (total != text.size()) {
+        return {defaultTextFragment(text, defaultColor)};
+    }
+    return fragments;
+}
+
+static void appendMergedFragment(std::vector<Neu_TextFragment>& out, const Neu_TextFragment& fragment)
+{
+    if (fragment.text.empty()) {
+        return;
+    }
+    if (!out.empty() && styleEquivalent(out.back(), fragment)) {
+        out.back().text += fragment.text;
+    } else {
+        out.push_back(fragment);
+    }
+}
+
+static bool sameColor(const Neu_Color& a, const Neu_Color& b)
+{
+    return a.r == b.r && a.g == b.g && a.b == b.b && a.a == b.a;
+}
+
+static Neu_TextFragment toggledStyle(Neu_TextFragment current, const Neu_TextFragment& requested)
+{
+    if (requested.bold) {
+        current.bold = !current.bold;
+    }
+    if (requested.italic) {
+        current.italic = !current.italic;
+    }
+    if (requested.underline) {
+        current.underline = !current.underline;
+    }
+    if (requested.strikethrough) {
+        current.strikethrough = !current.strikethrough;
+    }
+    if (requested.doubleStrikethrough) {
+        current.doubleStrikethrough = !current.doubleStrikethrough;
+    }
+    if (requested.monospace || !requested.fontName.empty()) {
+        const bool sameFont = current.fontName == requested.fontName && current.monospace == requested.monospace;
+        if (sameFont) {
+            current.fontName.clear();
+            current.monospace = false;
+        } else {
+            current.fontName = requested.fontName;
+            current.monospace = requested.monospace;
+        }
+    }
+    if (requested.headingLevel > 0) {
+        current.headingLevel = current.headingLevel == requested.headingLevel ? 0 : requested.headingLevel;
+    }
+    if (requested.useFontColor) {
+        if (current.useFontColor && sameColor(current.fontColor, requested.fontColor)) {
+            current.useFontColor = false;
+        } else {
+            current.useFontColor = true;
+            current.fontColor = requested.fontColor;
+        }
+    }
+    if (requested.useBackgroundColor) {
+        if (current.useBackgroundColor && sameColor(current.backgroundColor, requested.backgroundColor)) {
+            current.useBackgroundColor = false;
+        } else {
+            current.useBackgroundColor = true;
+            current.backgroundColor = requested.backgroundColor;
+        }
+    }
+    if (requested.useHighlightColor) {
+        if (current.useHighlightColor && sameColor(current.highlightColor, requested.highlightColor)) {
+            current.useHighlightColor = false;
+        } else {
+            current.useHighlightColor = true;
+            current.highlightColor = requested.highlightColor;
+        }
+    }
+    return current;
+}
+
+struct StyledRun {
+    size_t start{0};
+    size_t end{0};
+    std::string text;
+    Neu_TextFragment style;
+};
+
+struct StyledLine {
+    std::vector<StyledRun> runs;
+    size_t start{0};
+    size_t end{0};
+    int height{18};
+};
+
+static std::vector<StyledLine> buildStyledLines(const std::string& text,
+                                                const std::vector<Neu_TextFragment>& fragments,
+                                                const Neu_Color& defaultColor)
+{
+    std::vector<StyledLine> lines;
+    StyledLine current;
+    current.start = 0;
+    current.end = 0;
+    current.height = 18;
+
+    size_t global = 0;
+    const auto normalized = normalizedFragments(text, fragments, defaultColor);
+    for (auto fragment : normalized) {
+        if (!fragment.useFontColor) {
+            fragment.useFontColor = true;
+            fragment.fontColor = defaultColor;
+        }
+        size_t segmentStart = 0;
+        for (size_t i = 0; i < fragment.text.size(); ++i) {
+            const char ch = fragment.text[i];
+            const bool isNewline = ch == '\n' || ch == '\r';
+            if (!isNewline) {
+                continue;
+            }
+            if (i > segmentStart) {
+                Neu_TextFragment styled = fragment;
+                styled.text = fragment.text.substr(segmentStart, i - segmentStart);
+                StyledRun run;
+                run.start = global + segmentStart;
+                run.end = global + i;
+                run.text = styled.text;
+                run.style = styled;
+                current.runs.push_back(run);
+                current.end = run.end;
+                current.height = std::max(current.height, richLineHeight(styled));
+            }
+            lines.push_back(current);
+            current = StyledLine{};
+            size_t newlineAdvance = 1;
+            if (ch == '\r' && i + 1 < fragment.text.size() && fragment.text[i + 1] == '\n') {
+                newlineAdvance = 2;
+                ++i;
+            }
+            current.start = global + i + 1;
+            current.end = current.start;
+            current.height = 18;
+            segmentStart = i + 1;
+            (void)newlineAdvance;
+        }
+        if (segmentStart < fragment.text.size()) {
+            Neu_TextFragment styled = fragment;
+            styled.text = fragment.text.substr(segmentStart);
+            StyledRun run;
+            run.start = global + segmentStart;
+            run.end = global + fragment.text.size();
+            run.text = styled.text;
+            run.style = styled;
+            current.runs.push_back(run);
+            current.end = run.end;
+            current.height = std::max(current.height, richLineHeight(styled));
+        }
+        global += fragment.text.size();
+    }
+    lines.push_back(current);
+    if (lines.empty()) {
+        lines.push_back(StyledLine{});
+    }
+    return lines;
+}
+
+static int runTextWidth(Display* display,
+                        Drawable,
+                        GC gc,
+                        const Neu_Theme&,
+                        const StyledRun& run,
+                        const std::string& text)
+{
+    int base = run.style.monospace ? 8 : 7;
+    if (run.style.headingLevel > 0) {
+        base += std::max(1, 8 - run.style.headingLevel);
+    }
+    if (run.style.bold) {
+        base += 1;
+    }
+    int width = static_cast<int>(text.size()) * base;
+    if (display && gc) {
+        XFontStruct* font = XQueryFont(display, XGContextFromGC(gc));
+        if (font) {
+            width = XTextWidth(font, text.c_str(), static_cast<int>(text.size()));
+            XFreeFontInfo(nullptr, font, 1);
+        }
+    }
+    return std::max(0, width);
 }
 
 } // namespace
@@ -76,38 +350,54 @@ void Neu_RichTextCode::applyHighlightColor(const Neu_Color& color)
 
 void Neu_RichTextCode::applyFragmentStyleToSelection(const Neu_TextFragment& style)
 {
-    const size_t a = hasSelection() ? selectionStart() : 0;
-    const size_t b = hasSelection() ? selectionEnd() : text_.size();
+    const auto target = richToolbarTargetRange(text_, cursor_, hasSelection(), selectionStart_, selectionEnd_);
+    const size_t a = target.first;
+    const size_t b = target.second;
     if (text_.empty() || a >= b || b > text_.size()) {
         return;
     }
+
     pushUndoSnapshot();
-    std::vector<Neu_TextFragment> fragments;
-    if (a > 0) {
-        Neu_TextFragment before;
-        before.text = text_.substr(0, a);
-        before.useFontColor = true;
-        before.fontColor = defaultFontColor_;
-        fragments.push_back(before);
+    std::vector<Neu_TextFragment> result;
+    size_t base = 0;
+    const auto fragments = normalizedFragments(text_, richTextFragments_, defaultFontColor_);
+
+    for (auto fragment : fragments) {
+        if (!fragment.useFontColor) {
+            fragment.useFontColor = true;
+            fragment.fontColor = defaultFontColor_;
+        }
+        const size_t fragStart = base;
+        const size_t fragEnd = base + fragment.text.size();
+        if (fragEnd <= a || fragStart >= b) {
+            appendMergedFragment(result, fragment);
+            base = fragEnd;
+            continue;
+        }
+
+        const size_t localA = a > fragStart ? a - fragStart : 0;
+        const size_t localB = std::min(b, fragEnd) - fragStart;
+        if (localA > 0) {
+            Neu_TextFragment before = fragment;
+            before.text = fragment.text.substr(0, localA);
+            appendMergedFragment(result, before);
+        }
+        if (localB > localA) {
+            Neu_TextFragment middle = toggledStyle(fragment, style);
+            middle.text = fragment.text.substr(localA, localB - localA);
+            appendMergedFragment(result, middle);
+        }
+        if (localB < fragment.text.size()) {
+            Neu_TextFragment after = fragment;
+            after.text = fragment.text.substr(localB);
+            appendMergedFragment(result, after);
+        }
+        base = fragEnd;
     }
-    Neu_TextFragment selected = style;
-    selected.text = text_.substr(a, b - a);
-    if (!selected.useFontColor) {
-        selected.useFontColor = true;
-        selected.fontColor = defaultFontColor_;
-    }
-    if (!selected.fontName.empty()) {
-        selected.monospace = selected.fontName.find("Mono") != std::string::npos || selected.fontName.find("mono") != std::string::npos;
-    }
-    fragments.push_back(selected);
-    if (b < text_.size()) {
-        Neu_TextFragment after;
-        after.text = text_.substr(b);
-        after.useFontColor = true;
-        after.fontColor = defaultFontColor_;
-        fragments.push_back(after);
-    }
-    richTextFragments_ = fragments;
+
+    richTextFragments_ = result;
+    clearSelection();
+    cursor_ = b;
     requestRedraw();
 }
 
@@ -180,11 +470,9 @@ void Neu_RichTextCode::draw(Display* display, Drawable drawable, GC gc, const Ne
     Neu_Control::draw(display, drawable, gc, theme);
     const auto rect = bounds();
     const int toolbarHeight = toolbarVisible_ ? 34 : 0;
-    const int lineHeight = 18;
     const int contentLeft = rect.x + 56;
     const int contentTop = rect.y + toolbarHeight + 10;
     const int contentWidth = std::max(1, rect.width - 74);
-    int y = contentTop + 12 - scrollY();
     int maxWidth = rect.width;
     int naturalHeight = toolbarHeight + 20;
 
@@ -196,7 +484,20 @@ void Neu_RichTextCode::draw(Display* display, Drawable drawable, GC gc, const Ne
         for (const char* tool : tools) {
             XSetForeground(display, gc, Neu_Pixel(display, theme.border));
             XDrawRectangle(display, drawable, gc, tx, rect.y + 7, 42, 20);
-            drawText(display, drawable, gc, theme, tool, tx + 4, rect.y + 22);
+            drawTextColored(display,
+                            drawable,
+                            gc,
+                            theme,
+                            tool,
+                            tx + 4,
+                            rect.y + 22,
+                            Neu_Color{0, 0, 0, 255},
+                            false,
+                            false,
+                            false,
+                            false,
+                            false,
+                            false);
             tx += 46;
             if (tx > rect.x + rect.width - 50) {
                 break;
@@ -214,74 +515,83 @@ void Neu_RichTextCode::draw(Display* display, Drawable drawable, GC gc, const Ne
                     static_cast<unsigned short>(std::max(1, rect.height - toolbarHeight - 16))};
     XSetClipRectangles(display, gc, 0, 0, &clip, 1, Unsorted);
 
+    int yTop = contentTop - scrollY();
+    const size_t selA = selectionStart();
+    const size_t selB = selectionEnd();
+
     if (!richTextFragments().empty()) {
-        size_t fragmentBase = 0;
-        for (const auto& f : richTextFragments()) {
-            const int fh = richLineHeight(f);
-            std::vector<std::string> logicalParts = splitPreserveLines(f.text);
-            size_t localOffset = 0;
-            for (const auto& logicalPart : logicalParts) {
-                const auto parts = wordWrap_ ? wrapTextToWidth(display, drawable, gc, theme, logicalPart, contentWidth)
-                                             : std::vector<std::string>{logicalPart};
-                size_t visualOffset = 0;
-                for (const auto& part : parts) {
-                    const size_t lineStartOffset = fragmentBase + localOffset + visualOffset;
-                    const size_t lineEndOffset = std::min(text_.size(), lineStartOffset + part.size());
-                    const std::string visible = wordWrap_ ? part : truncateTextToWidth(display, drawable, gc, theme, part, contentWidth + scrollX());
-                    const int w = measureTextWidth(display, drawable, gc, theme, visible, f.bold, f.italic, f.monospace, f.headingLevel);
-                    maxWidth = std::max(maxWidth, w + 90);
-                    if (y >= rect.y + toolbarHeight + 14 && y < rect.y + rect.height - 6) {
-                        if (f.useBackgroundColor || f.useHighlightColor) {
-                            XSetForeground(display, gc, Neu_Pixel(display, f.useHighlightColor ? f.highlightColor : f.backgroundColor));
-                            XFillRectangle(display, drawable, gc, contentLeft - scrollX(), y - fh + 5, std::max(1, w), fh);
-                        }
-                        if (focused_ && hasSelection()) {
-                            const size_t selA = selectionStart();
-                            const size_t selB = selectionEnd();
-                            if (selB > lineStartOffset && selA < lineEndOffset) {
-                                const size_t localA = std::max(selA, lineStartOffset) - lineStartOffset;
-                                const size_t localB = std::min(selB, lineEndOffset) - lineStartOffset;
-                                const int sx = contentLeft - scrollX() + measureTextWidth(display, drawable, gc, theme, part.substr(0, std::min(localA, part.size())), f.bold, f.italic, f.monospace, f.headingLevel);
-                                const int ex = contentLeft - scrollX() + measureTextWidth(display, drawable, gc, theme, part.substr(0, std::min(localB, part.size())), f.bold, f.italic, f.monospace, f.headingLevel);
-                                XSetForeground(display, gc, Neu_Pixel(display, theme.highlight));
-                                XFillRectangle(display, drawable, gc, std::min(sx, ex), y - fh + 5, std::max(1, std::abs(ex - sx)), fh);
-                            }
-                        }
-                        drawTextColored(display,
-                                        drawable,
-                                        gc,
-                                        theme,
-                                        visible,
-                                        alignedTextX(display, drawable, gc, theme, visible, contentLeft - scrollX(), contentWidth),
-                                        y,
-                                        f.useFontColor ? f.fontColor : defaultFontColor_,
-                                        f.bold,
-                                        f.italic,
-                                        f.underline,
-                                        f.strikethrough,
-                                        f.doubleStrikethrough,
-                                        f.monospace,
-                                        f.headingLevel);
+        const auto lines = buildStyledLines(text_, richTextFragments_, defaultFontColor_);
+        for (const auto& line : lines) {
+            const int lineHeight = std::max(18, line.height);
+            const int baseline = yTop + lineHeight - 5;
+            int x = contentLeft - scrollX();
+            if (baseline >= rect.y + toolbarHeight + 10 && yTop < rect.y + rect.height - 6) {
+                for (const auto& run : line.runs) {
+                    const int w = runTextWidth(display, drawable, gc, theme, run, run.text);
+                    maxWidth = std::max(maxWidth, x - contentLeft + scrollX() + w + 90);
+                    if (run.style.useBackgroundColor || run.style.useHighlightColor) {
+                        XSetForeground(display, gc, Neu_Pixel(display, run.style.useHighlightColor ? run.style.highlightColor : run.style.backgroundColor));
+                        XFillRectangle(display, drawable, gc, x, yTop + 1, std::max(1, w), std::max(1, lineHeight - 2));
                     }
-                    y += fh;
-                    naturalHeight += fh;
-                    visualOffset += part.size();
-                }
-                localOffset += logicalPart.size();
-                if (localOffset < f.text.size()) {
-                    if (f.text[localOffset] == '\r' && localOffset + 1 < f.text.size() && f.text[localOffset + 1] == '\n') {
-                        localOffset += 2;
-                    } else if (f.text[localOffset] == '\r' || f.text[localOffset] == '\n') {
-                        ++localOffset;
+                    if (focused_ && hasSelection() && selB > run.start && selA < run.end) {
+                        const size_t localA = std::max(selA, run.start) - run.start;
+                        const size_t localB = std::min(selB, run.end) - run.start;
+                        const int sx = x + runTextWidth(display, drawable, gc, theme, run, run.text.substr(0, std::min(localA, run.text.size())));
+                        const int ex = x + runTextWidth(display, drawable, gc, theme, run, run.text.substr(0, std::min(localB, run.text.size())));
+                        XSetForeground(display, gc, Neu_Pixel(display, theme.highlight));
+                        XFillRectangle(display, drawable, gc, std::min(sx, ex), yTop + 1, std::max(1, std::abs(ex - sx)), std::max(1, lineHeight - 2));
                     }
+                    drawTextColored(display,
+                                    drawable,
+                                    gc,
+                                    theme,
+                                    run.text,
+                                    x,
+                                    baseline,
+                                    run.style.useFontColor ? run.style.fontColor : defaultFontColor_,
+                                    run.style.bold,
+                                    run.style.italic,
+                                    run.style.underline,
+                                    run.style.strikethrough,
+                                    run.style.doubleStrikethrough,
+                                    run.style.monospace,
+                                    run.style.headingLevel);
+                    x += w;
                 }
             }
-            fragmentBase += f.text.size();
+            yTop += lineHeight;
+            naturalHeight += lineHeight;
+        }
+
+        if (focused_) {
+            int caretY = contentTop - scrollY();
+            int caretX = contentLeft - scrollX();
+            const size_t c = std::min(cursor_, text_.size());
+            for (const auto& line : lines) {
+                const int lineHeight = std::max(18, line.height);
+                if (c >= line.start && c <= line.end) {
+                    int x = contentLeft - scrollX();
+                    for (const auto& run : line.runs) {
+                        if (c >= run.start && c <= run.end) {
+                            caretX = x + runTextWidth(display, drawable, gc, theme, run, run.text.substr(0, c - run.start));
+                            break;
+                        }
+                        x += runTextWidth(display, drawable, gc, theme, run, run.text);
+                        caretX = x;
+                    }
+                    XSetForeground(display, gc, Neu_Pixel(display, theme.accent));
+                    XDrawLine(display, drawable, gc, caretX, caretY + 2, caretX, caretY + lineHeight - 3);
+                    break;
+                }
+                caretY += lineHeight;
+            }
         }
     } else {
+        const int lineHeight = 18;
         const auto sourceLines = splitPreserveLines(text());
         int lineNo = 1;
         size_t logicalOffset = 0;
+        int y = contentTop + 12 - scrollY();
         for (const auto& line : sourceLines) {
             const size_t lineStartOffset = logicalOffset;
             const size_t lineEndOffset = std::min(text_.size(), lineStartOffset + line.size());
@@ -295,15 +605,13 @@ void Neu_RichTextCode::draw(Display* display, Drawable drawable, GC gc, const Ne
                         XFillRectangle(display, drawable, gc, rect.x + 50, y - 14, rect.width - 64, lineHeight);
                     }
                     if (focused_ && hasSelection()) {
-                        const size_t selA = selectionStart();
-                        const size_t selB = selectionEnd();
                         if (selB > lineStartOffset && selA < lineEndOffset) {
                             const size_t localA = std::max(selA, lineStartOffset) - lineStartOffset;
                             const size_t localB = std::min(selB, lineEndOffset) - lineStartOffset;
                             const int sx = contentLeft - scrollX() + measureTextWidth(display, drawable, gc, theme, line.substr(0, localA), false, false, true);
                             const int ex = contentLeft - scrollX() + measureTextWidth(display, drawable, gc, theme, line.substr(0, localB), false, false, true);
                             XSetForeground(display, gc, Neu_Pixel(display, theme.highlight));
-                            XFillRectangle(display, drawable, gc, std::min(sx, ex), y - lineHeight + 4, std::max(1, std::abs(ex - sx)), lineHeight);
+                            XFillRectangle(display, drawable, gc, std::min(sx, ex), y - lineHeight + 6, std::max(1, std::abs(ex - sx)), std::max(1, lineHeight - 2));
                         }
                     }
                     drawTextColored(display,
@@ -357,33 +665,6 @@ void Neu_RichTextCode::draw(Display* display, Drawable drawable, GC gc, const Ne
         }
     }
 
-
-    if (!richTextFragments().empty() && focused_) {
-        size_t localCursor = std::min(cursor_, text_.size());
-        size_t lineIndex = 0;
-        size_t lineStart = 0;
-        for (size_t i = 0; i < localCursor; ++i) {
-            if (text_[i] == '\r') {
-                if (i + 1 < localCursor && text_[i + 1] == '\n') {
-                    ++i;
-                }
-                ++lineIndex;
-                lineStart = i + 1;
-            } else if (text_[i] == '\n') {
-                ++lineIndex;
-                lineStart = i + 1;
-            }
-        }
-        const size_t colBytes = localCursor >= lineStart ? localCursor - lineStart : 0;
-        std::string prefix = text_.substr(lineStart, colBytes);
-        while (!prefix.empty() && (prefix.back() == '\r' || prefix.back() == '\n')) {
-            prefix.pop_back();
-        }
-        const int caretX = contentLeft - scrollX() + measureTextWidth(display, drawable, gc, theme, prefix, false, false, true);
-        const int caretY = contentTop + static_cast<int>(lineIndex) * lineHeight - scrollY();
-        XSetForeground(display, gc, Neu_Pixel(display, theme.accent));
-        XDrawLine(display, drawable, gc, caretX, caretY, caretX, caretY + lineHeight - 3);
-    }
     XSetClipMask(display, gc, None);
     setAutoScroll(true);
     setVirtualSize(std::max(rect.width, maxWidth), std::max(rect.height, naturalHeight + 20));
@@ -401,38 +682,37 @@ void Neu_RichTextCode::handleXEvent(XEvent& event)
     auto cursorFromRichPoint = [&](int px, int py) -> size_t {
         const auto rect = bounds();
         const int toolbarHeight = toolbarVisible_ ? 34 : 0;
-        constexpr int lineHeight = 18;
         const int contentLeft = rect.x + 56;
         const int contentTop = rect.y + toolbarHeight + 10;
-        const int lineIndex = std::max(0, (py - contentTop + scrollY()) / lineHeight);
-        const auto lines = splitPreserveLines(text_);
-        const int clampedLine = std::min(lineIndex, std::max(0, static_cast<int>(lines.size()) - 1));
-        size_t start = 0;
-        for (int i = 0; i < clampedLine && start < text_.size(); ++i) {
-            while (start < text_.size() && text_[start] != '\n' && text_[start] != '\r') {
-                ++start;
+        const int localY = py - contentTop + scrollY();
+        const auto styledLines = buildStyledLines(text_, richTextFragments_, defaultFontColor_);
+        int accumulated = 0;
+        for (const auto& line : styledLines) {
+            const int lineHeight = std::max(18, line.height);
+            if (localY < accumulated + lineHeight) {
+                const int localX = px - contentLeft + (wordWrap_ ? 0 : scrollX());
+                int x = 0;
+                for (const auto& run : line.runs) {
+                    const int w = runTextWidth(nullptr, 0, 0, Neu_Theme{}, run, run.text);
+                    if (localX <= x + w) {
+                        size_t cursor = run.start;
+                        for (size_t i = 1; i <= run.text.size(); ++i) {
+                            const int prefixWidth = runTextWidth(nullptr, 0, 0, Neu_Theme{}, run, run.text.substr(0, i));
+                            if (x + prefixWidth <= localX) {
+                                cursor = run.start + i;
+                            } else {
+                                break;
+                            }
+                        }
+                        return cursor;
+                    }
+                    x += w;
+                }
+                return line.end;
             }
-            if (start < text_.size() && text_[start] == '\r' && start + 1 < text_.size() && text_[start + 1] == '\n') {
-                start += 2;
-            } else if (start < text_.size()) {
-                ++start;
-            }
+            accumulated += lineHeight;
         }
-        size_t end = start;
-        while (end < text_.size() && text_[end] != '\n' && text_[end] != '\r') {
-            ++end;
-        }
-        const int localX = px - contentLeft + (wordWrap_ ? 0 : scrollX());
-        size_t newCursor = start;
-        for (size_t i = start + 1; i <= end; ++i) {
-            const std::string prefix = text_.substr(start, i - start);
-            if (measureTextWidth(nullptr, 0, 0, Neu_Theme{}, prefix, false, false, true) <= localX) {
-                newCursor = i;
-            } else {
-                break;
-            }
-        }
-        return newCursor;
+        return text_.size();
     };
 
     if (!readOnly_ && event.type == ButtonPress && contains(event.xbutton.x, event.xbutton.y)) {
@@ -539,6 +819,7 @@ void Neu_RichTextCode::handleXEvent(XEvent& event)
                     eraseCount = 2;
                 }
                 text_.erase(eraseAt, eraseCount);
+                richTextFragments_.clear();
                 cursor_ = eraseAt;
                 invokeTextChanged();
                 size_t lineStart = 0;

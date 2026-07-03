@@ -231,3 +231,36 @@ make -f Makefile.autoconf -j2 build-autoconf/neutrino_test_20_full_richtext_cont
 ## Stage2 text navigation and selection update
 
 See `STAGE2_TEXT_NAV_SELECTION_FIXES.md` for the multiline/rich-text cursor movement and selection highlight fix pass.
+
+## Stage2 rich text selection/formatting verification
+
+Verified Linux build targets after patching rich text selection coordinates and toolbar formatting range behavior:
+
+```sh
+make -j2 build/libNeutrino.a build/neutrino_test_20_full_richtext_control build/neutrino_test_21_full_richtext_code_control
+cmake -S . -B /mnt/data/cmake-neutrino-richselection
+cmake --build /mnt/data/cmake-neutrino-richselection --target Neutrino neutrino_test_20_full_richtext_control neutrino_test_21_full_richtext_code_control -j2
+make -f Makefile.autoconf -j2 build-autoconf/libNeutrino.a build-autoconf/neutrino_test_20_full_richtext_control build-autoconf/neutrino_test_21_full_richtext_code_control
+```
+
+The VS2022 source path was patched in `src/win32/Neu_Win32.cpp`; MSVC is not available in this Linux container.
+
+## Stage2 rich text inline/toggle formatting verification
+
+Verified Linux build targets after the rich text inline-fragment and toggle-formatting update:
+
+```sh
+make -j2 build/libNeutrino.a \
+  build/neutrino_test_20_full_richtext_control \
+  build/neutrino_test_21_full_richtext_code_control
+
+cmake -S . -B /mnt/data/cmake-neutrino-rich-toggle
+cmake --build /mnt/data/cmake-neutrino-rich-toggle --target Neutrino \
+  neutrino_test_20_full_richtext_control \
+  neutrino_test_21_full_richtext_code_control -j2
+
+make -f Makefile.autoconf -j2 \
+  build-autoconf/libNeutrino.a \
+  build-autoconf/neutrino_test_20_full_richtext_control \
+  build-autoconf/neutrino_test_21_full_richtext_code_control
+```
