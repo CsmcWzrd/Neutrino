@@ -390,3 +390,47 @@ VM mode keeps multi-stage buffering enabled but disables expensive supersampled 
 ## Stage2 fix pack notes
 
 See `STAGE2_FIXES.md` for the latest Stage2 fixes covering scroll-window clipping, splitter-pane clipping, header resizing, text caret hit testing, ComboBox/Spinner arrow alignment, and Windows CheckBox/RadioButton smoothing.
+
+## Stage2 beauty rendering update
+
+The default visual theme is now `MaterialDark`. New windows initialize with this theme unless the application explicitly calls `window.setTheme(...)`.
+
+Theme-driven surface rendering now includes:
+
+- gradient control surfaces for buttons, text boxes, combo boxes, scroll windows, and value controls;
+- theme-defined `highlight` and `focus` colors;
+- default top-left and bottom-right edge/chamfer corners;
+- selectable corner modes through `Neu_CornerStyle`;
+- theme-selected antialiasing mode through `Neu_AntiAliasMode::DAA`, `Neu_AntiAliasMode::MSAA`, or `Neu_AntiAliasMode::SSAA`.
+
+Example:
+
+```cpp
+neutrino::Neu_Theme theme = neutrino::Neu_Theme::MaterialDark();
+theme.gradientControls = true;
+theme.highlight = {64, 76, 92, 255};
+theme.focus = {42, 112, 178, 255};
+theme.controlGradientTop = {58, 62, 70, 255};
+theme.controlGradientBottom = {22, 24, 30, 255};
+theme.setDefaultEdgeCorners();
+theme.antiAliasMode = neutrino::Neu_AntiAliasMode::SSAA;
+theme.antiAliasSamples = 4;
+window.setTheme(theme);
+```
+
+The default corner profile is equivalent to:
+
+```cpp
+theme.setCornerStyles(neutrino::Neu_CornerStyle::EdgeCorner,
+                      neutrino::Neu_CornerStyle::RoundedCorner,
+                      neutrino::Neu_CornerStyle::RoundedCorner,
+                      neutrino::Neu_CornerStyle::EdgeCorner);
+```
+
+The new demo `neutrino_test_19_material_beauty` demonstrates MaterialDark, gradients, focus/highlight colors, rounded/edge corner switching, and DAA/MSAA/SSAA theme settings.
+
+See `STAGE2_BEAUTY_RENDERING.md` for implementation notes and the theme asset keywords such as `rounded-corner`, `top-left-rounded-corner`, and `top-left-edge-corner`.
+
+## Stage2 Win32 caret/theme fix pass
+
+The Stage2 package includes a Windows-focused fix pass for rich-text caret drift after newline deletion, theme-shaped row highlights, theme-shaped shadows, theme-shaped tab/progress highlights, and disabled hover fills for large/container controls such as rich text, read-only rich text, placements, scroll windows, list views, tree views, and multiline text boxes. See `STAGE2_WIN32_CARET_THEME_FIXES.md`.

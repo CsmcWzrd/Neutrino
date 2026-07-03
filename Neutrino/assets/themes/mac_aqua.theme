@@ -1,0 +1,9 @@
+# Neutrino proprietary theme asset: mac_aqua
+name=mac_aqua
+background=#ECECEC
+glass=#FFFFFF
+border=#B8B8B8
+text=#202020
+accent=#0A84FF
+hover=#EAF4FF
+pressed=#DCEBFF

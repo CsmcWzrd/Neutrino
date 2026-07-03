@@ -234,9 +234,15 @@ void Neu_TreeView::draw(Display* display, Drawable drawable, GC gc, const Neu_Th
         const int visibleIndex = static_cast<int>(index);
         if (selectedVisibleRows_.count(visibleIndex) != 0U || visibleIndex == selectedVisibleRow_ || visibleIndex == hoveredVisibleRow_) {
             XSetForeground(display, gc, Neu_Pixel(display, (selectedVisibleRows_.count(visibleIndex) != 0U || visibleIndex == selectedVisibleRow_) ? theme.pressed : theme.hover));
-            XFillRectangle(display, drawable, gc, viewportLeft, y - 16,
-                           static_cast<unsigned int>(std::max(1, viewportRight - viewportLeft)),
-                           static_cast<unsigned int>(kTreeRowHeight));
+            Neu_DrawSmoothRoundedRect(display, drawable, gc,
+                                      (selectedVisibleRows_.count(visibleIndex) != 0U || visibleIndex == selectedVisibleRow_) ? theme.pressed : theme.hover,
+                                      theme.background,
+                                      viewportLeft, y - 16,
+                                      std::max(1, viewportRight - viewportLeft),
+                                      kTreeRowHeight,
+                                      std::max(2, theme.radius - 3),
+                                      true,
+                                      theme.antiAliasSamples);
         }
 
         const auto& row = rows[index];

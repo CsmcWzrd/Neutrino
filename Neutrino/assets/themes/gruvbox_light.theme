@@ -1,0 +1,9 @@
+# Neutrino proprietary theme asset: gruvbox_light
+name=gruvbox_light
+background=#FBF1C7
+glass=#EBDBB2
+border=#BDAE93
+text=#3C3836
+accent=#458588
+hover=#F2E5BC
+pressed=#D5C4A1

@@ -1,0 +1,9 @@
+# Neutrino proprietary theme asset: classic_motif
+name=classic_motif
+background=#D6D3CE
+glass=#E8E8E8
+border=#5A5A5A
+text=#101010
+accent=#2D5F8B
+hover=#EFEFEF
+pressed=#C8C8C8

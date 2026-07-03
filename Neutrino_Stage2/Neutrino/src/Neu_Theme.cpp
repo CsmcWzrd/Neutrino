@@ -5,6 +5,18 @@ namespace neutrino {
 
 namespace {
 
+static Neu_Color localLighten(Neu_Color color, int amount)
+{
+    auto add = [amount](uint8_t v) -> uint8_t { return static_cast<uint8_t>(std::min(255, static_cast<int>(v) + amount)); };
+    return {add(color.r), add(color.g), add(color.b), color.a};
+}
+
+static Neu_Color localDarken(Neu_Color color, int amount)
+{
+    auto sub = [amount](uint8_t v) -> uint8_t { return static_cast<uint8_t>(std::max(0, static_cast<int>(v) - amount)); };
+    return {sub(color.r), sub(color.g), sub(color.b), color.a};
+}
+
 static Neu_Theme makeTheme(Neu_Color background,
                            Neu_Color glass,
                            Neu_Color border,
@@ -26,10 +38,19 @@ static Neu_Theme makeTheme(Neu_Color background,
     theme.accent = accent;
     theme.hover = hover;
     theme.pressed = pressed;
+    theme.highlight = hover;
+    theme.focus = localDarken(accent, 56);
+    theme.controlGradientTop = localLighten(glass, 24);
+    theme.controlGradientBottom = localDarken(glass, 20);
     theme.shadow = shadow;
     theme.hintBackground = hintBackground;
     theme.hintBorder = hintBorder;
     theme.radius = radius;
+    theme.edgeSize = std::max(4, std::min(14, radius + 4));
+    theme.gradientControls = true;
+    theme.setDefaultEdgeCorners();
+    theme.antiAliasMode = Neu_AntiAliasMode::DAA;
+    theme.antiAliasSamples = 3;
     theme.fontName = font;
     return theme;
 }
@@ -49,7 +70,7 @@ static std::string lowerName(std::string value)
 
 Neu_Theme Neu_Theme::Light()
 {
-    return Neu_Theme{};
+    return makeTheme({245, 248, 252, 255}, {238, 246, 255, 235}, {150, 175, 205, 255}, {20, 28, 38, 255}, {70, 135, 220, 255}, {225, 238, 255, 255}, {190, 215, 250, 255}, {36, 52, 70, 85}, {255, 255, 232, 245}, {118, 132, 72, 255}, 12);
 }
 
 Neu_Theme Neu_Theme::Dark()
@@ -153,7 +174,15 @@ Neu_Theme Neu_Theme::MaterialLight()
 
 Neu_Theme Neu_Theme::MaterialDark()
 {
-    return makeTheme({18, 18, 18, 255}, {33, 33, 33, 240}, {80, 80, 80, 255}, {238, 238, 238, 255}, {3, 169, 244, 255}, {45, 45, 45, 255}, {66, 66, 66, 255}, {0, 0, 0, 140}, {45, 45, 45, 250}, {3, 169, 244, 255}, 6, "Roboto:size=10:antialias=true");
+    Neu_Theme t = makeTheme({18, 18, 18, 255}, {30, 30, 34, 240}, {62, 66, 74, 255}, {238, 238, 238, 255}, {144, 202, 249, 255}, {64, 76, 92, 255}, {56, 60, 68, 255}, {0, 0, 0, 140}, {34, 34, 38, 250}, {144, 202, 249, 255}, 10, "Roboto:size=10:antialias=true:hinting=true:hintstyle=hintfull:rgba=rgb:lcdfilter=lcddefault");
+    t.focus = {42, 112, 178, 255};
+    t.controlGradientTop = {58, 62, 70, 255};
+    t.controlGradientBottom = {22, 24, 30, 255};
+    t.edgeSize = 8;
+    t.antiAliasMode = Neu_AntiAliasMode::SSAA;
+    t.antiAliasSamples = 4;
+    t.setDefaultEdgeCorners();
+    return t;
 }
 
 Neu_Theme Neu_Theme::Ocean()
@@ -198,12 +227,14 @@ Neu_Theme Neu_Theme::CorporateBlue()
 
 std::vector<std::string> Neu_Theme::BuiltInThemeNames()
 {
-    return {"Light", "Dark", "BlueGlass", "Win95", "WinXP", "Win10", "Win11", "ClassicMotif", "SolarizedLight", "SolarizedDark", "Nord", "Dracula", "GruvboxLight", "GruvboxDark", "HighContrastLight", "HighContrastDark", "UbuntuAubergine", "KDEBreeze", "MacAqua", "MaterialLight", "MaterialDark", "Ocean", "Forest", "Rose", "Amber", "Slate", "Candy", "TerminalGreen", "CorporateBlue"};
+    return {"MaterialDark", "Light", "Dark", "BlueGlass", "Win95", "WinXP", "Win10", "Win11", "ClassicMotif", "SolarizedLight", "SolarizedDark", "Nord", "Dracula", "GruvboxLight", "GruvboxDark", "HighContrastLight", "HighContrastDark", "UbuntuAubergine", "KDEBreeze", "MacAqua", "MaterialLight", "Ocean", "Forest", "Rose", "Amber", "Slate", "Candy", "TerminalGreen", "CorporateBlue"};
 }
 
 Neu_Theme Neu_Theme::BuiltInThemeByName(const std::string& name)
 {
     const std::string key = lowerName(name);
+    if (key == "materialdark") return MaterialDark();
+    if (key == "light") return Light();
     if (key == "dark") return Dark();
     if (key == "blueglass") return BlueGlass();
     if (key == "win95") return Win95();
@@ -223,7 +254,6 @@ Neu_Theme Neu_Theme::BuiltInThemeByName(const std::string& name)
     if (key == "kdebreeze") return KDEBreeze();
     if (key == "macaqua") return MacAqua();
     if (key == "materiallight") return MaterialLight();
-    if (key == "materialdark") return MaterialDark();
     if (key == "ocean") return Ocean();
     if (key == "forest") return Forest();
     if (key == "rose") return Rose();

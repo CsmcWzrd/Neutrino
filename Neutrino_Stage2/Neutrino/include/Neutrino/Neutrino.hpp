@@ -57,6 +57,17 @@ struct Neu_Color { uint8_t r{0}, g{0}, b{0}, a{255}; };
 
 enum class Neu_TextAlignment { Left, Center, Right };
 
+enum class Neu_CornerStyle {
+    RoundedCorner,
+    EdgeCorner
+};
+
+enum class Neu_AntiAliasMode {
+    DAA,   // default device/font/XRender antialiasing
+    MSAA,  // multi-sample shape antialiasing
+    SSAA   // super-sample shape antialiasing
+};
+
 struct Neu_TextOffset {
     int top{2};
     int right{4};
@@ -102,21 +113,38 @@ struct Neu_SmoothGraphicsOptions {
 };
 
 struct Neu_Theme {
-    Neu_Color background{245,248,252,255};
-    Neu_Color glass{238,246,255,210};
-    Neu_Color border{150,175,205,255};
-    Neu_Color text{20,28,38,255};
-    Neu_Color accent{70,135,220,255};
-    Neu_Color hover{225,238,255,255};
-    Neu_Color pressed{190,215,250,255};
-    Neu_Color shadow{36, 52, 70, 85};
-    Neu_Color hintBackground{255, 255, 232, 245};
-    Neu_Color hintBorder{118, 132, 72, 255};
-    int radius{12};
+    // Material-dark is the default theme used by new windows.
+    Neu_Color background{18,18,18,255};
+    Neu_Color glass{30,30,34,235};
+    Neu_Color border{62,66,74,255};
+    Neu_Color text{238,238,238,255};
+    Neu_Color accent{144,202,249,255};
+    Neu_Color hover{42,44,50,255};
+    Neu_Color pressed{56,60,68,255};
+    Neu_Color highlight{64,76,92,255};
+    Neu_Color focus{42,112,178,255};
+    Neu_Color controlGradientTop{58,62,70,255};
+    Neu_Color controlGradientBottom{22,24,30,255};
+    Neu_Color shadow{0, 0, 0, 135};
+    Neu_Color hintBackground{34, 34, 38, 250};
+    Neu_Color hintBorder{144, 202, 249, 255};
+    int radius{10};
+    int edgeSize{8};
+    bool gradientControls{true};
+    Neu_CornerStyle topLeftCorner{Neu_CornerStyle::EdgeCorner};
+    Neu_CornerStyle topRightCorner{Neu_CornerStyle::RoundedCorner};
+    Neu_CornerStyle bottomLeftCorner{Neu_CornerStyle::RoundedCorner};
+    Neu_CornerStyle bottomRightCorner{Neu_CornerStyle::EdgeCorner};
+    Neu_AntiAliasMode antiAliasMode{Neu_AntiAliasMode::DAA};
+    int antiAliasSamples{3};
     int shadowSize{7};
     int shadowOffsetX{3};
     int shadowOffsetY{4};
     std::string fontName{"DejaVu Sans:size=10:antialias=true:hinting=true:hintstyle=hintfull:rgba=rgb:lcdfilter=lcddefault"};
+    void setAllCorners(Neu_CornerStyle style) { topLeftCorner = style; topRightCorner = style; bottomLeftCorner = style; bottomRightCorner = style; }
+    void setCornerStyles(Neu_CornerStyle topLeft, Neu_CornerStyle topRight, Neu_CornerStyle bottomLeft, Neu_CornerStyle bottomRight) { topLeftCorner = topLeft; topRightCorner = topRight; bottomLeftCorner = bottomLeft; bottomRightCorner = bottomRight; }
+    void setRoundedCorners() { setAllCorners(Neu_CornerStyle::RoundedCorner); }
+    void setDefaultEdgeCorners() { setCornerStyles(Neu_CornerStyle::EdgeCorner, Neu_CornerStyle::RoundedCorner, Neu_CornerStyle::RoundedCorner, Neu_CornerStyle::EdgeCorner); }
     static Neu_Theme Light();
     static Neu_Theme Dark();
     static Neu_Theme BlueGlass();
@@ -752,7 +780,7 @@ public:
     void handleXEvent(XEvent& ev);
     Window xid() const { return window_; }
     Neu_Theme& theme() { return theme_; }
-    void setTheme(const Neu_Theme& t) { theme_ = t; }
+    void setTheme(const Neu_Theme& t);
     void setOnClose(Neu_WindowCallback cb, void* user_data) { onClose_ = cb; closeUserData_ = user_data; }
     int width() const { return width_; }
     int height() const { return height_; }
@@ -799,6 +827,11 @@ Neu_SmoothGraphicsOptions Neu_GetSmoothGraphicsOptions();
 void Neu_EnableAntialiasing(bool enabled);
 void Neu_UseVirtualMachineFriendlyDefaults(bool enabled);
 void Neu_EnableMultiStageDoubleBuffering(bool enabled);
+void Neu_SetCurrentDrawingTheme(const Neu_Theme& theme);
+void Neu_ApplyThemeRenderingOptions(const Neu_Theme& theme);
+Neu_Color Neu_LightenColor(const Neu_Color& color, int amount);
+Neu_Color Neu_DarkenColor(const Neu_Color& color, int amount);
+Neu_Color Neu_MixColor(const Neu_Color& a, const Neu_Color& b, double t);
 void Neu_DrawRoundedRect(Display* d, Drawable drawable, GC gc, int x, int y, int w, int h, int radius, bool fill);
 void Neu_DrawSmoothRoundedRect(Display* d, Drawable drawable, GC gc, const Neu_Color& color, const Neu_Color& background, int x, int y, int w, int h, int radius, bool fill, int supersample = 4);
 void Neu_DrawSmoothDropShadow(Display* d, Drawable drawable, GC gc, const Neu_Color& shadow, const Neu_Color& background, int x, int y, int w, int h, int radius, int blur, int offsetX, int offsetY);

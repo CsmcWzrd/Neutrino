@@ -33,6 +33,7 @@ Run Linux examples from the project root so relative BMP paths such as `assets/i
 | `neutrino_test_16_value_controls` / `NeutrinoTest16ValueControls` | `examples/neutrino_test_16_value_controls.cpp` | `Neu_ProgressBar`, `Neu_ProgressSquare`, horizontal/vertical `Neu_Slider`, `Neu_Spinner`, and value-control callbacks. |
 | `neutrino_test_17_tabs_toolbar_splitter` / `NeutrinoTest17TabsToolbarSplitter` | `examples/neutrino_test_17_tabs_toolbar_splitter.cpp` | `Neu_ToolBar`, `Neu_TabView`, `Neu_Splitter`, fixed-position tab pages, icons, and nested controls. |
 | `neutrino_test_18_stage2_scroll_controls` / `NeutrinoTest18Stage2ScrollControls` | `examples/neutrino_test_18_stage2_scroll_controls.cpp` | `Neu_ScrollWindow` containing Stage2 controls, clipping, scrolling and nested child drawing on Linux/Windows. |
+| `neutrino_test_19_material_beauty` / `NeutrinoTest19MaterialBeauty` | `examples/neutrino_test_19_material_beauty.cpp` | Stage2 beauty rendering: MaterialDark default, gradient surfaces, highlight/focus colors, edge/rounded corner switching, and DAA/MSAA/SSAA theme antialiasing. |
 
 ## Windows-only demo
 

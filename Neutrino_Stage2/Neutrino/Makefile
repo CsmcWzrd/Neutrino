@@ -57,7 +57,8 @@ EXAMPLES = build/neutrino_demo \
     build/neutrino_test_15_selection_controls \
     build/neutrino_test_16_value_controls \
     build/neutrino_test_17_tabs_toolbar_splitter \
-    build/neutrino_test_18_stage2_scroll_controls
+    build/neutrino_test_18_stage2_scroll_controls \
+    build/neutrino_test_19_material_beauty
 
 all: $(LIB) $(EXAMPLES)
 

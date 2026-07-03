@@ -56,6 +56,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "NeutrinoTest17TabsToolbarSp
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "NeutrinoTest18Stage2ScrollControls", "NeutrinoTest18Stage2ScrollControls.vcxproj", "{84A4DD91-0789-5F9C-97BF-B64A5C1264C9}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "NeutrinoTest19MaterialBeauty", "NeutrinoTest19MaterialBeauty.vcxproj", "{87E23700-C37F-5A0D-9961-BA6F1F18E351}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -170,6 +172,10 @@ Global
 		{84A4DD91-0789-5F9C-97BF-B64A5C1264C9}.Debug|x64.Build.0 = Debug|x64
 		{84A4DD91-0789-5F9C-97BF-B64A5C1264C9}.Release|x64.ActiveCfg = Release|x64
 		{84A4DD91-0789-5F9C-97BF-B64A5C1264C9}.Release|x64.Build.0 = Release|x64
+		{87E23700-C37F-5A0D-9961-BA6F1F18E351}.Debug|x64.ActiveCfg = Debug|x64
+		{87E23700-C37F-5A0D-9961-BA6F1F18E351}.Debug|x64.Build.0 = Debug|x64
+		{87E23700-C37F-5A0D-9961-BA6F1F18E351}.Release|x64.ActiveCfg = Release|x64
+		{87E23700-C37F-5A0D-9961-BA6F1F18E351}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

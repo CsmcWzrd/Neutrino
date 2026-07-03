@@ -6,6 +6,7 @@
 #include <windowsx.h>
 #include <commctrl.h>
 #include <algorithm>
+#include <cmath>
 #include <cwchar>
 #include <sstream>
 #include <cctype>
@@ -13,6 +14,7 @@
 namespace neutrino {
 
 static Neu_SmoothGraphicsOptions g_options{};
+static Neu_Theme g_currentDrawingTheme{};
 static const wchar_t* kNeuWindowClass = L"Neutrino_Neu_Window";
 static HINSTANCE g_instance = nullptr;
 static bool g_windowClassRegistered = false;
@@ -88,6 +90,31 @@ static COLORREF rgb(const Neu_Color& c)
     return RGB(c.r, c.g, c.b);
 }
 
+Neu_Color Neu_LightenColor(const Neu_Color& color, int amount)
+{
+    auto add = [amount](uint8_t value) -> uint8_t {
+        return static_cast<uint8_t>(((static_cast<int>(value) + amount) > 255 ? 255 : (static_cast<int>(value) + amount)));
+    };
+    return {add(color.r), add(color.g), add(color.b), color.a};
+}
+
+Neu_Color Neu_DarkenColor(const Neu_Color& color, int amount)
+{
+    auto sub = [amount](uint8_t value) -> uint8_t {
+        return static_cast<uint8_t>(((static_cast<int>(value) - amount) < 0 ? 0 : (static_cast<int>(value) - amount)));
+    };
+    return {sub(color.r), sub(color.g), sub(color.b), color.a};
+}
+
+Neu_Color Neu_MixColor(const Neu_Color& a, const Neu_Color& b, double t)
+{
+    t = std::max(0.0, std::min(1.0, t));
+    auto mix = [t](uint8_t av, uint8_t bv) -> uint8_t {
+        return static_cast<uint8_t>(std::round(static_cast<double>(av) * (1.0 - t) + static_cast<double>(bv) * t));
+    };
+    return {mix(a.r, b.r), mix(a.g, b.g), mix(a.b, b.b), mix(a.a, b.a)};
+}
+
 
 static Neu_Theme makeThemeWin32(Neu_Color background,
                                 Neu_Color glass,
@@ -110,10 +137,19 @@ static Neu_Theme makeThemeWin32(Neu_Color background,
     theme.accent = accent;
     theme.hover = hover;
     theme.pressed = pressed;
+    theme.highlight = hover;
+    theme.focus = Neu_DarkenColor(accent, 56);
+    theme.controlGradientTop = Neu_LightenColor(glass, 24);
+    theme.controlGradientBottom = Neu_DarkenColor(glass, 20);
     theme.shadow = shadow;
     theme.hintBackground = hintBackground;
     theme.hintBorder = hintBorder;
     theme.radius = radius;
+    theme.edgeSize = std::max(4, std::min(14, radius + 4));
+    theme.gradientControls = true;
+    theme.setDefaultEdgeCorners();
+    theme.antiAliasMode = Neu_AntiAliasMode::DAA;
+    theme.antiAliasSamples = 3;
     theme.fontName = font;
     return theme;
 }
@@ -414,18 +450,112 @@ static void drawCenteredTriangleWin32(HDC hdc, COLORREF color, int cx, int cy, b
     DeleteObject(brush);
 }
 
-static void fillRound(HDC hdc, const Neu_Rect& r, int radius, COLORREF fill, COLORREF border)
+static COLORREF mixColorRefWin32(COLORREF a, COLORREF b, double t)
 {
-    HBRUSH brush = CreateSolidBrush(fill);
+    t = std::max(0.0, std::min(1.0, t));
+    auto mix = [t](int av, int bv) -> BYTE {
+        return static_cast<BYTE>(std::round(static_cast<double>(av) * (1.0 - t) + static_cast<double>(bv) * t));
+    };
+    return RGB(mix(GetRValue(a), GetRValue(b)), mix(GetGValue(a), GetGValue(b)), mix(GetBValue(a), GetBValue(b)));
+}
+
+static bool hasEdgeCornersWin32(const Neu_Theme& theme)
+{
+    return theme.topLeftCorner == Neu_CornerStyle::EdgeCorner
+           || theme.topRightCorner == Neu_CornerStyle::EdgeCorner
+           || theme.bottomLeftCorner == Neu_CornerStyle::EdgeCorner
+           || theme.bottomRightCorner == Neu_CornerStyle::EdgeCorner;
+}
+
+static void beginThemedRectPathWin32(HDC hdc, const Neu_Rect& r, int radius)
+{
+    BeginPath(hdc);
+    if (!hasEdgeCornersWin32(g_currentDrawingTheme)) {
+        RoundRect(hdc, r.x, r.y, r.x + r.width, r.y + r.height, radius * 2, radius * 2);
+    } else {
+        const int e = neuMaxIntWin32(0, neuMinIntWin32(g_currentDrawingTheme.edgeSize, neuMinIntWin32(r.width, r.height) / 2));
+        const int tl = g_currentDrawingTheme.topLeftCorner == Neu_CornerStyle::EdgeCorner ? e : 0;
+        const int tr = g_currentDrawingTheme.topRightCorner == Neu_CornerStyle::EdgeCorner ? e : 0;
+        const int bl = g_currentDrawingTheme.bottomLeftCorner == Neu_CornerStyle::EdgeCorner ? e : 0;
+        const int br = g_currentDrawingTheme.bottomRightCorner == Neu_CornerStyle::EdgeCorner ? e : 0;
+        POINT pts[8]{
+            POINT{r.x + tl, r.y},
+            POINT{r.x + r.width - tr, r.y},
+            POINT{r.x + r.width, r.y + tr},
+            POINT{r.x + r.width, r.y + r.height - br},
+            POINT{r.x + r.width - br, r.y + r.height},
+            POINT{r.x + bl, r.y + r.height},
+            POINT{r.x, r.y + r.height - bl},
+            POINT{r.x, r.y + tl}
+        };
+        Polygon(hdc, pts, 8);
+    }
+    EndPath(hdc);
+}
+
+static void strokeThemedRectWin32(HDC hdc, const Neu_Rect& r, int radius, COLORREF border)
+{
     HPEN pen = CreatePen(PS_SOLID, 1, border);
-    HGDIOBJ oldBrush = SelectObject(hdc, brush);
     HGDIOBJ oldPen = SelectObject(hdc, pen);
-    RoundRect(hdc, r.x, r.y, r.x + r.width, r.y + r.height, radius * 2, radius * 2);
+    HGDIOBJ oldBrush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
+    if (!hasEdgeCornersWin32(g_currentDrawingTheme)) {
+        RoundRect(hdc, r.x, r.y, r.x + r.width, r.y + r.height, radius * 2, radius * 2);
+    } else {
+        const int e = neuMaxIntWin32(0, neuMinIntWin32(g_currentDrawingTheme.edgeSize, neuMinIntWin32(r.width, r.height) / 2));
+        const int tl = g_currentDrawingTheme.topLeftCorner == Neu_CornerStyle::EdgeCorner ? e : 0;
+        const int tr = g_currentDrawingTheme.topRightCorner == Neu_CornerStyle::EdgeCorner ? e : 0;
+        const int bl = g_currentDrawingTheme.bottomLeftCorner == Neu_CornerStyle::EdgeCorner ? e : 0;
+        const int br = g_currentDrawingTheme.bottomRightCorner == Neu_CornerStyle::EdgeCorner ? e : 0;
+        POINT pts[9]{
+            POINT{r.x + tl, r.y},
+            POINT{r.x + r.width - tr, r.y},
+            POINT{r.x + r.width, r.y + tr},
+            POINT{r.x + r.width, r.y + r.height - br},
+            POINT{r.x + r.width - br, r.y + r.height},
+            POINT{r.x + bl, r.y + r.height},
+            POINT{r.x, r.y + r.height - bl},
+            POINT{r.x, r.y + tl},
+            POINT{r.x + tl, r.y}
+        };
+        Polyline(hdc, pts, 9);
+    }
     SelectObject(hdc, oldBrush);
     SelectObject(hdc, oldPen);
-    DeleteObject(brush);
     DeleteObject(pen);
 }
+
+static void fillRound(HDC hdc, const Neu_Rect& r, int radius, COLORREF fill, COLORREF border)
+{
+    if (!hdc || r.width <= 0 || r.height <= 0) {
+        return;
+    }
+
+    int saved = SaveDC(hdc);
+    beginThemedRectPathWin32(hdc, r, radius);
+    SelectClipPath(hdc, RGN_AND);
+
+    if (g_currentDrawingTheme.gradientControls) {
+        const COLORREF top = mixColorRefWin32(fill, rgb(g_currentDrawingTheme.controlGradientTop), 0.42);
+        const COLORREF bottom = mixColorRefWin32(fill, rgb(g_currentDrawingTheme.controlGradientBottom), 0.42);
+        for (int yy = 0; yy < r.height; ++yy) {
+            const double t = static_cast<double>(yy) / static_cast<double>(neuMaxIntWin32(1, r.height - 1));
+            const COLORREF lineColor = mixColorRefWin32(top, bottom, t);
+            HBRUSH brush = CreateSolidBrush(lineColor);
+            RECT line{r.x, r.y + yy, r.x + r.width, r.y + yy + 1};
+            FillRect(hdc, &line, brush);
+            DeleteObject(brush);
+        }
+    } else {
+        HBRUSH brush = CreateSolidBrush(fill);
+        RECT rect{r.x, r.y, r.x + r.width, r.y + r.height};
+        FillRect(hdc, &rect, brush);
+        DeleteObject(brush);
+    }
+
+    RestoreDC(hdc, saved);
+    strokeThemedRectWin32(hdc, r, radius, border);
+}
+
 
 static uint16_t read16(const std::vector<uint8_t>& bytes, size_t offset)
 {
@@ -631,6 +761,8 @@ Neu_Color Neu_PixelToColor(Display*, unsigned long pixel)
 void Neu_SetSmoothGraphicsOptions(const Neu_SmoothGraphicsOptions& options)
 {
     g_options = options;
+    g_options.supersample = std::max(1, std::min(8, g_options.supersample));
+    g_options.bufferStages = std::max(1, std::min(3, g_options.bufferStages));
 }
 
 Neu_SmoothGraphicsOptions Neu_GetSmoothGraphicsOptions()
@@ -659,17 +791,39 @@ void Neu_EnableMultiStageDoubleBuffering(bool enabled)
     g_options.multiStageDoubleBuffering = enabled;
 }
 
+void Neu_ApplyThemeRenderingOptions(const Neu_Theme& theme)
+{
+    if (g_options.vmFriendly) {
+        return;
+    }
+    g_options.enabled = true;
+    if (theme.antiAliasMode == Neu_AntiAliasMode::SSAA) {
+        g_options.backend = Neu_GraphicsBackend::SoftwareAntialias;
+        g_options.supersample = std::max(4, std::min(8, theme.antiAliasSamples));
+    } else if (theme.antiAliasMode == Neu_AntiAliasMode::MSAA) {
+        g_options.backend = Neu_GraphicsBackend::SoftwareAntialias;
+        g_options.supersample = std::max(3, std::min(6, theme.antiAliasSamples));
+    } else {
+        g_options.backend = Neu_GraphicsBackend::XRenderAntialias;
+        g_options.supersample = std::max(2, std::min(4, theme.antiAliasSamples));
+    }
+}
+
+void Neu_SetCurrentDrawingTheme(const Neu_Theme& theme)
+{
+    g_currentDrawingTheme = theme;
+    Neu_ApplyThemeRenderingOptions(theme);
+}
+
 void Neu_DrawRoundedRect(Display*, Drawable drawable, GC, int x, int y, int w, int h, int radius, bool fill)
 {
     Neu_Rect r{x, y, w, h};
-    COLORREF border = RGB(110, 130, 160);
-    COLORREF color = fill ? RGB(236, 244, 255) : RGB(255, 255, 255);
-    fillRound(drawable, r, radius, color, border);
+    fillRound(drawable, r, radius, rgb(fill ? g_currentDrawingTheme.glass : g_currentDrawingTheme.border), rgb(g_currentDrawingTheme.border));
 }
 
 void Neu_DrawSmoothRoundedRect(Display*, Drawable drawable, GC, const Neu_Color& color, const Neu_Color&, int x, int y, int w, int h, int radius, bool, int)
 {
-    fillRound(drawable, Neu_Rect{x, y, w, h}, radius, rgb(color), RGB(110, 130, 160));
+    fillRound(drawable, Neu_Rect{x, y, w, h}, radius, rgb(color), rgb(g_currentDrawingTheme.border));
 }
 
 void Neu_DrawSmoothDropShadow(Display*, Drawable drawable, GC, const Neu_Color& shadow, const Neu_Color&, int x, int y, int w, int h, int radius, int, int offsetX, int offsetY)
@@ -678,15 +832,17 @@ void Neu_DrawSmoothDropShadow(Display*, Drawable drawable, GC, const Neu_Color& 
         return;
     }
 
+    const Neu_Rect sr{x + offsetX, y + offsetY, w, h};
+    int saved = SaveDC(drawable);
+    beginThemedRectPathWin32(drawable, sr, radius);
     HBRUSH brush = CreateSolidBrush(RGB(shadow.r, shadow.g, shadow.b));
     HPEN pen = CreatePen(PS_SOLID, 1, RGB(shadow.r, shadow.g, shadow.b));
     HGDIOBJ oldBrush = SelectObject(drawable, brush);
     HGDIOBJ oldPen = SelectObject(drawable, pen);
-    RoundRect(drawable, x + offsetX, y + offsetY, x + offsetX + w, y + offsetY + h, radius * 2, radius * 2);
-    SelectObject(drawable, oldBrush);
-    SelectObject(drawable, oldPen);
-    DeleteObject(brush);
+    FillPath(drawable);
+    RestoreDC(drawable, saved);
     DeleteObject(pen);
+    DeleteObject(brush);
 }
 
 namespace {
@@ -712,10 +868,19 @@ static Neu_Theme makeTheme(Neu_Color background,
     theme.accent = accent;
     theme.hover = hover;
     theme.pressed = pressed;
+    theme.highlight = hover;
+    theme.focus = Neu_DarkenColor(accent, 56);
+    theme.controlGradientTop = Neu_LightenColor(glass, 24);
+    theme.controlGradientBottom = Neu_DarkenColor(glass, 20);
     theme.shadow = shadow;
     theme.hintBackground = hintBackground;
     theme.hintBorder = hintBorder;
     theme.radius = radius;
+    theme.edgeSize = std::max(4, std::min(14, radius + 4));
+    theme.gradientControls = true;
+    theme.setDefaultEdgeCorners();
+    theme.antiAliasMode = Neu_AntiAliasMode::DAA;
+    theme.antiAliasSamples = 3;
     theme.fontName = font;
     return theme;
 }
@@ -735,7 +900,7 @@ static std::string lowerName(std::string value)
 
 Neu_Theme Neu_Theme::Light()
 {
-    return Neu_Theme{};
+    return makeTheme({245, 248, 252, 255}, {238, 246, 255, 235}, {150, 175, 205, 255}, {20, 28, 38, 255}, {70, 135, 220, 255}, {225, 238, 255, 255}, {190, 215, 250, 255}, {36, 52, 70, 85}, {255, 255, 232, 245}, {118, 132, 72, 255}, 12);
 }
 
 Neu_Theme Neu_Theme::Dark()
@@ -839,7 +1004,15 @@ Neu_Theme Neu_Theme::MaterialLight()
 
 Neu_Theme Neu_Theme::MaterialDark()
 {
-    return makeTheme({18, 18, 18, 255}, {33, 33, 33, 240}, {80, 80, 80, 255}, {238, 238, 238, 255}, {3, 169, 244, 255}, {45, 45, 45, 255}, {66, 66, 66, 255}, {0, 0, 0, 140}, {45, 45, 45, 250}, {3, 169, 244, 255}, 6, "Roboto:size=10:antialias=true");
+    Neu_Theme t = makeTheme({18, 18, 18, 255}, {30, 30, 34, 240}, {62, 66, 74, 255}, {238, 238, 238, 255}, {144, 202, 249, 255}, {64, 76, 92, 255}, {56, 60, 68, 255}, {0, 0, 0, 140}, {34, 34, 38, 250}, {144, 202, 249, 255}, 10, "Segoe UI");
+    t.focus = {42, 112, 178, 255};
+    t.controlGradientTop = {58, 62, 70, 255};
+    t.controlGradientBottom = {22, 24, 30, 255};
+    t.edgeSize = 8;
+    t.antiAliasMode = Neu_AntiAliasMode::SSAA;
+    t.antiAliasSamples = 4;
+    t.setDefaultEdgeCorners();
+    return t;
 }
 
 Neu_Theme Neu_Theme::Ocean()
@@ -884,12 +1057,14 @@ Neu_Theme Neu_Theme::CorporateBlue()
 
 std::vector<std::string> Neu_Theme::BuiltInThemeNames()
 {
-    return {"Light", "Dark", "BlueGlass", "Win95", "WinXP", "Win10", "Win11", "ClassicMotif", "SolarizedLight", "SolarizedDark", "Nord", "Dracula", "GruvboxLight", "GruvboxDark", "HighContrastLight", "HighContrastDark", "UbuntuAubergine", "KDEBreeze", "MacAqua", "MaterialLight", "MaterialDark", "Ocean", "Forest", "Rose", "Amber", "Slate", "Candy", "TerminalGreen", "CorporateBlue"};
+    return {"MaterialDark", "Light", "Dark", "BlueGlass", "Win95", "WinXP", "Win10", "Win11", "ClassicMotif", "SolarizedLight", "SolarizedDark", "Nord", "Dracula", "GruvboxLight", "GruvboxDark", "HighContrastLight", "HighContrastDark", "UbuntuAubergine", "KDEBreeze", "MacAqua", "MaterialLight", "Ocean", "Forest", "Rose", "Amber", "Slate", "Candy", "TerminalGreen", "CorporateBlue"};
 }
 
 Neu_Theme Neu_Theme::BuiltInThemeByName(const std::string& name)
 {
     const std::string key = lowerName(name);
+    if (key == "materialdark") return MaterialDark();
+    if (key == "light") return Light();
     if (key == "dark") return Dark();
     if (key == "blueglass") return BlueGlass();
     if (key == "win95") return Win95();
@@ -909,7 +1084,6 @@ Neu_Theme Neu_Theme::BuiltInThemeByName(const std::string& name)
     if (key == "kdebreeze") return KDEBreeze();
     if (key == "macaqua") return MacAqua();
     if (key == "materiallight") return MaterialLight();
-    if (key == "materialdark") return MaterialDark();
     if (key == "ocean") return Ocean();
     if (key == "forest") return Forest();
     if (key == "rose") return Rose();
@@ -1344,7 +1518,7 @@ void Neu_Control::drawScrollbars(Display*, Drawable drawable, GC, const Neu_Them
     const bool needVertical = virtualSize_.height > r.height;
     const bool needHorizontal = virtualSize_.width > r.width;
     HBRUSH track = CreateSolidBrush(RGB(205, 215, 226));
-    HBRUSH thumb = CreateSolidBrush(rgb(theme.accent));
+    HBRUSH thumb = CreateSolidBrush(rgb(theme.focus));
 
     if (needVertical) {
         const int trackX = r.x + r.width - 10;
@@ -1393,19 +1567,21 @@ void Neu_Control::invokeTextChanged()
 void Neu_Control::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme)
 {
     Neu_Rect r = bounds();
-    fillRound(drawable, r, theme.radius, rgb(hover_ ? theme.hover : theme.glass), rgb(focused_ ? theme.accent : theme.border));
-    if (focused_) {
-        HPEN pen = CreatePen(PS_SOLID, 1, rgb(theme.accent));
-        HGDIOBJ oldPen = SelectObject(drawable, pen);
-        HGDIOBJ oldBrush = SelectObject(drawable, GetStockObject(NULL_BRUSH));
-        RoundRect(drawable, r.x + 2, r.y + 2, r.x + r.width - 2, r.y + r.height - 2, theme.radius * 2, theme.radius * 2);
-        SelectObject(drawable, oldBrush);
-        SelectObject(drawable, oldPen);
-        DeleteObject(pen);
+    const std::string cls = className();
+    const bool suppressHoverFill = cls == "Neu_RichTextCode"
+                                   || cls == "Neu_ReadOnlyRichText"
+                                   || cls == "Neu_Placement"
+                                   || cls == "Neu_ScrollWindow"
+                                   || cls == "Neu_ListView"
+                                   || cls == "Neu_TreeView"
+                                   || cls == "Neu_Multilinetextbox";
+    const bool visualHover = hover_ && !suppressHoverFill;
+    fillRound(drawable, r, theme.radius, rgb(visualHover ? theme.highlight : theme.glass), rgb(focused_ ? theme.focus : theme.border));
+    if (focused_ && !suppressHoverFill) {
+        strokeThemedRectWin32(drawable, Neu_Rect{r.x + 2, r.y + 2, r.width - 4, r.height - 4}, std::max(1, theme.radius - 2), rgb(theme.focus));
     }
     drawIconBmp(d, drawable, gc, r.x + 6, r.y + 6, r.height - 12);
 
-    const std::string cls = className();
     const bool baseText = cls == "Neu_Button" || cls == "Neu_Control" || cls == "Neu_MenuItem" || cls == "Neu_FlatButton";
     if (baseText && !text_.empty()) {
         const int textLeft = r.x + (icon_.width() > 0 ? r.height : 10);
@@ -1593,7 +1769,7 @@ void Neu_Textbox::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& th
     if (focused_) {
         const int caretX = textLeft + prefixWidth - textScrollX_;
         if (caretX >= r.x + 6 && caretX <= r.x + r.width - 6) {
-            HPEN pen = CreatePen(PS_SOLID, 1, rgb(theme.accent));
+            HPEN pen = CreatePen(PS_SOLID, 1, rgb(theme.focus));
             HGDIOBJ old = SelectObject(drawable, pen);
             MoveToEx(drawable, caretX, r.y + 8, nullptr);
             LineTo(drawable, caretX, r.y + r.height - 8);
@@ -1760,7 +1936,7 @@ void Neu_Multilinetextbox::draw(Display* d, Drawable drawable, GC gc, const Neu_
         const int caretX = r.x + 10 + measureTextWidth(d, drawable, gc, theme, prefix) - (wordWrap_ ? 0 : scrollX_);
         const int caretY = r.y + 8 + static_cast<int>(lineIndex) * lineHeight - scrollY_;
         if (caretY >= r.y + 6 && caretY < r.y + r.height - 10) {
-            HPEN pen = CreatePen(PS_SOLID, 1, rgb(theme.accent));
+            HPEN pen = CreatePen(PS_SOLID, 1, rgb(theme.focus));
             HGDIOBJ old = SelectObject(drawable, pen);
             MoveToEx(drawable, caretX, caretY - 2, nullptr);
             LineTo(drawable, caretX, caretY + lineHeight - 4);
@@ -2102,7 +2278,7 @@ void Neu_ListView::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& t
                      visibleHeader.left + 5,
                      viewportTop + std::max(4, (headerHeight_ - 16) / 2));
             RestoreDC(drawable, cellSaved);
-            HPEN pen = CreatePen(PS_SOLID, 1, rgb(theme.accent));
+            HPEN pen = CreatePen(PS_SOLID, 1, rgb(theme.focus));
             HGDIOBJ oldPen = SelectObject(drawable, pen);
             MoveToEx(drawable, hcell.right, viewportTop + 3, nullptr);
             LineTo(drawable, hcell.right, bodyTop - 3);
@@ -2124,10 +2300,11 @@ void Neu_ListView::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& t
         const bool rowSelected = multiSelect_ ? selectedRows_.count(static_cast<int>(row)) != 0U : static_cast<int>(row) == selectedRow_;
         const bool rowHovered = static_cast<int>(row) == hoveredRow_;
         if (rowSelected || rowHovered) {
-            RECT rr{viewportLeft, y - 18, viewportRight, y + 3};
-            HBRUSH b = CreateSolidBrush(rgb(rowSelected ? theme.pressed : theme.hover));
-            FillRect(drawable, &rr, b);
-            DeleteObject(b);
+            fillRound(drawable,
+                      Neu_Rect{viewportLeft, y - 18, std::max(1, viewportRight - viewportLeft), 21},
+                      std::max(2, theme.radius - 3),
+                      rgb(rowSelected ? theme.pressed : theme.hover),
+                      rgb(rowSelected ? theme.focus : theme.border));
         }
         int x = r.x + 10 - scrollX_;
         for (size_t col = 0; col < (*model_)[row].size(); ++col) {
@@ -2454,7 +2631,7 @@ void Neu_TreeView::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& t
              visibleHeader.left + 5,
              viewportTop + std::max(4, (headerH - 16) / 2));
     RestoreDC(drawable, headerSaved);
-    HPEN headerPen = CreatePen(PS_SOLID, 1, rgb(theme.accent));
+    HPEN headerPen = CreatePen(PS_SOLID, 1, rgb(theme.focus));
     HGDIOBJ oldHeaderPen = SelectObject(drawable, headerPen);
     const int boundaryX = std::min(viewportRight - 1, headerRight - 1);
     MoveToEx(drawable, boundaryX, viewportTop + 3, nullptr);
@@ -2474,10 +2651,11 @@ void Neu_TreeView::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& t
         const bool selected = multiSelect_ ? selectedVisibleRows_.count(static_cast<int>(i)) != 0U : static_cast<int>(i) == selectedVisibleRow_;
         const bool hovered = static_cast<int>(i) == hoveredVisibleRow_;
         if (selected || hovered) {
-            RECT rr{viewportLeft, y - 18, viewportRight, y + 3};
-            HBRUSH b = CreateSolidBrush(rgb(selected ? theme.pressed : theme.hover));
-            FillRect(drawable, &rr, b);
-            DeleteObject(b);
+            fillRound(drawable,
+                      Neu_Rect{viewportLeft, y - 18, std::max(1, viewportRight - viewportLeft), 21},
+                      std::max(2, theme.radius - 3),
+                      rgb(selected ? theme.pressed : theme.hover),
+                      rgb(selected ? theme.focus : theme.border));
         }
         const auto& row = rows[i];
         const int indent = row.depth * 18;
@@ -2687,7 +2865,7 @@ void Neu_ScrollBar::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& 
     const int thumb = std::max(18, track * page_ / std::max(1, total_));
     const int maxValue = std::max(1, total_ - page_);
     const int pos = (track - thumb) * value_ / maxValue;
-    HBRUSH b = CreateSolidBrush(rgb(theme.accent));
+    HBRUSH b = CreateSolidBrush(rgb(theme.focus));
     if (vertical_) {
         RECT th{r.x + 2, r.y + pos, r.x + r.width - 2, r.y + pos + thumb};
         FillRect(drawable, &th, b);
@@ -3036,7 +3214,7 @@ void Neu_RichTextCode::draw(Display* d, Drawable drawable, GC gc, const Neu_Them
         const int caretX = contentLeft + measureTextWidth(d, drawable, gc, theme, prefix, false, false, true) - (wordWrap_ ? 0 : scrollX());
         const int caretY = contentTop + 2 + static_cast<int>(lineIndex) * 20 - scrollY();
         if (caretY >= contentTop && caretY < contentBottom) {
-            HPEN pen = CreatePen(PS_SOLID, 1, rgb(theme.accent));
+            HPEN pen = CreatePen(PS_SOLID, 1, rgb(theme.focus));
             HGDIOBJ old = SelectObject(drawable, pen);
             MoveToEx(drawable, caretX, caretY - 2, nullptr);
             LineTo(drawable, caretX, caretY + 16);
@@ -3085,6 +3263,22 @@ void Neu_RichTextCode::handleXEvent(XEvent& ev)
             requestRedraw();
             return;
         }
+    }
+
+    if (focused_ && ev.message == WM_CHAR && ev.wParam == L'\b') {
+        const size_t before = cursor_;
+        Neu_Multilinetextbox::handleXEvent(ev);
+        if (cursor_ != before) {
+            // Re-normalize caret after deleting a newline so the visual x/y uses the new logical line.
+            if (cursor_ < text_.size() && text_[cursor_] == '\r') {
+                text_.erase(cursor_, 1);
+            }
+            if (scrollX_ < 0) {
+                scrollX_ = 0;
+            }
+            requestRedraw();
+        }
+        return;
     }
 
     Neu_Multilinetextbox::handleXEvent(ev);
@@ -3266,7 +3460,7 @@ void Neu_CheckBox::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& t
     (void)gc;
     Neu_Rect r = bounds();
     RECT bg{r.x, r.y, r.x + r.width, r.y + r.height};
-    HBRUSH b = CreateSolidBrush(rgb(hover_ ? theme.hover : theme.glass));
+    HBRUSH b = CreateSolidBrush(rgb(hover_ ? theme.highlight : theme.glass));
     FillRect(drawable, &bg, b);
     DeleteObject(b);
 
@@ -3277,10 +3471,10 @@ void Neu_CheckBox::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& t
                                    4,
                                    rgb(hover_ ? theme.hover : theme.background),
                                    rgb(theme.glass),
-                                   rgb(focused_ ? theme.accent : theme.border),
+                                   rgb(focused_ ? theme.focus : theme.border),
                                    true);
     if (checked_) {
-        HPEN pen = CreatePen(PS_SOLID, 2, rgb(theme.accent));
+        HPEN pen = CreatePen(PS_SOLID, 2, rgb(theme.focus));
         HGDIOBJ old = SelectObject(drawable, pen);
         SetBkMode(drawable, TRANSPARENT);
         MoveToEx(drawable, cb.left + 3, cb.top + box / 2, nullptr);
@@ -3319,7 +3513,7 @@ void Neu_RadioButton::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme
     (void)gc;
     Neu_Rect r = bounds();
     RECT bg{r.x, r.y, r.x + r.width, r.y + r.height};
-    HBRUSH b = CreateSolidBrush(rgb(hover_ ? theme.hover : theme.glass));
+    HBRUSH b = CreateSolidBrush(rgb(hover_ ? theme.highlight : theme.glass));
     FillRect(drawable, &bg, b);
     DeleteObject(b);
     const int box = std::max(12, std::min(18, r.height - 8));
@@ -3330,11 +3524,11 @@ void Neu_RadioButton::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme
                                  outer,
                                  rgb(hover_ ? theme.hover : theme.background),
                                  rgb(theme.glass),
-                                 rgb(focused_ ? theme.accent : theme.border),
+                                 rgb(focused_ ? theme.focus : theme.border),
                                  true);
     if (checked_) {
         RECT dot{x + 4, y + 4, x + box - 4, y + box - 4};
-        drawSupersampledEllipseWin32(drawable, dot, rgb(theme.glass), rgb(theme.accent), rgb(theme.accent), true);
+        drawSupersampledEllipseWin32(drawable, dot, rgb(theme.glass), rgb(theme.focus), rgb(theme.focus), true);
     }
     const int left = x + box + 7 + textOffset_.left;
     drawPlainTextWin(drawable,
@@ -3358,7 +3552,7 @@ void Neu_ToggleButton::draw(Display* d, Drawable drawable, GC gc, const Neu_Them
               r,
               theme.radius,
               rgb(checked_ ? theme.pressed : (hover_ ? theme.hover : theme.glass)),
-              rgb(focused_ ? theme.accent : theme.border));
+              rgb(focused_ ? theme.focus : theme.border));
 
     const int left = r.x + textOffset_.left;
     const int top = r.y + textOffset_.top;
@@ -3387,11 +3581,16 @@ void Neu_ProgressBar::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme
     Neu_Control::draw(d, drawable, gc, theme);
     Neu_Rect r = bounds();
     RECT inner{r.x + 5, r.y + 5, r.x + r.width - 5, r.y + r.height - 5};
-    const int fillRight = inner.left + static_cast<int>((inner.right - inner.left) * progress_);
-    RECT fill{inner.left, inner.top, fillRight, inner.bottom};
-    HBRUSH b = CreateSolidBrush(rgb(theme.accent));
-    FillRect(drawable, &fill, b);
-    DeleteObject(b);
+    const int innerW = std::max(1, static_cast<int>(inner.right - inner.left));
+    const int innerH = std::max(1, static_cast<int>(inner.bottom - inner.top));
+    const int fillW = std::max(0, static_cast<int>(innerW * progress_));
+    if (fillW > 0) {
+        fillRound(drawable,
+                  Neu_Rect{inner.left, inner.top, fillW, innerH},
+                  std::max(2, theme.radius - 4),
+                  rgb(theme.focus),
+                  rgb(theme.focus));
+    }
     drawPlainTextWin(drawable, theme, text_.empty() ? std::to_string(static_cast<int>(progress_ * 100.0f)) + "%" : text_, inner.left + 4, inner.top + 2, inner.right - 4, inner.bottom - 2, rgb(theme.text));
     drawHintPopup(d, drawable, gc, theme);
 }
@@ -3409,7 +3608,7 @@ void Neu_Slider::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& the
         LineTo(drawable, x, r.y + r.height - 8);
         SelectObject(drawable, old);
         DeleteObject(track);
-        HBRUSH knob = CreateSolidBrush(rgb(theme.accent));
+        HBRUSH knob = CreateSolidBrush(rgb(theme.focus));
         HGDIOBJ oldBrush = SelectObject(drawable, knob);
         const int y = r.y + 8 + static_cast<int>((r.height - 16) * (1.0f - t));
         Ellipse(drawable, x - 7, y - 7, x + 7, y + 7);
@@ -3421,7 +3620,7 @@ void Neu_Slider::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& the
         LineTo(drawable, r.x + r.width - 8, y);
         SelectObject(drawable, old);
         DeleteObject(track);
-        HBRUSH knob = CreateSolidBrush(rgb(theme.accent));
+        HBRUSH knob = CreateSolidBrush(rgb(theme.focus));
         HGDIOBJ oldBrush = SelectObject(drawable, knob);
         const int x = r.x + 8 + static_cast<int>((r.width - 16) * t);
         Ellipse(drawable, x - 7, y - 7, x + 7, y + 7);
@@ -3523,7 +3722,7 @@ void Neu_LinkLabel::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& 
     (void)d;
     (void)gc;
     Neu_Rect r = bounds();
-    drawPlainTextWin(drawable, theme, text_, r.x + textOffset_.left, r.y + textOffset_.top + std::max(0, (r.height - 16) / 2), r.x + r.width - textOffset_.right, r.y + r.height - textOffset_.bottom, rgb(theme.accent), true);
+    drawPlainTextWin(drawable, theme, text_, r.x + textOffset_.left, r.y + textOffset_.top + std::max(0, (r.height - 16) / 2), r.x + r.width - textOffset_.right, r.y + r.height - textOffset_.bottom, rgb(theme.focus), true);
     drawHintPopup(d, drawable, gc, theme);
 }
 
@@ -3644,7 +3843,7 @@ void Neu_Splitter::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& t
         RestoreDC(drawable, saved);
     }
 
-    HBRUSH b = CreateSolidBrush(rgb(theme.accent));
+    HBRUSH b = CreateSolidBrush(rgb(theme.focus));
     if (vertical_) {
         RECT sr{splitAbs - 2, r.y + 4, splitAbs + 2, r.y + r.height - 4};
         FillRect(drawable, &sr, b);
@@ -3706,8 +3905,10 @@ Neu_Window::Neu_Window(Neu_Application& app, int width, int height, const std::s
       display_(nullptr),
       width_(std::max(1, width)),
       height_(std::max(1, height)),
-      title_(title)
+      title_(title),
+      theme_(Neu_Theme::MaterialDark())
 {
+    Neu_ApplyThemeRenderingOptions(theme_);
 }
 
 Neu_Window::~Neu_Window()
@@ -3819,8 +4020,16 @@ void Neu_Window::ensureBuffers()
     bufferHeight_ = height_;
 }
 
+void Neu_Window::setTheme(const Neu_Theme& theme)
+{
+    theme_ = theme;
+    Neu_ApplyThemeRenderingOptions(theme_);
+    requestRedraw();
+}
+
 void Neu_Window::drawScene(Drawable target)
 {
+    Neu_SetCurrentDrawingTheme(theme_);
     RECT rc{0, 0, width_, height_};
     HBRUSH b = CreateSolidBrush(rgb(theme_.background));
     FillRect(target, &rc, b);
@@ -3845,6 +4054,7 @@ void Neu_Window::drawScene(Drawable target)
 
 void Neu_Window::paint(Drawable target)
 {
+    Neu_SetCurrentDrawingTheme(theme_);
     if (!target || width_ <= 0 || height_ <= 0) {
         return;
     }

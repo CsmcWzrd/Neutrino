@@ -1,0 +1,9 @@
+# Neutrino proprietary theme asset: slate
+name=slate
+background=#1F2937
+glass=#374151
+border=#6B7280
+text=#F9FAFB
+accent=#60A5FA
+hover=#4B5563
+pressed=#111827

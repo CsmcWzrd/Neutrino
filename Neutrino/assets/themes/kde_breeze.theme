@@ -1,0 +1,9 @@
+# Neutrino proprietary theme asset: kde_breeze
+name=kde_breeze
+background=#EFF0F1
+glass=#FCFCFC
+border=#BDC3C7
+text=#232629
+accent=#3DAEE9
+hover=#E8F6FE
+pressed=#D7EFFB

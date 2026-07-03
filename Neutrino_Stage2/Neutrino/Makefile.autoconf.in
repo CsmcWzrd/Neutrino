@@ -60,7 +60,8 @@ EXAMPLES = build-autoconf/neutrino_demo \
     build-autoconf/neutrino_test_15_selection_controls \
     build-autoconf/neutrino_test_16_value_controls \
     build-autoconf/neutrino_test_17_tabs_toolbar_splitter \
-    build-autoconf/neutrino_test_18_stage2_scroll_controls
+    build-autoconf/neutrino_test_18_stage2_scroll_controls \
+    build-autoconf/neutrino_test_19_material_beauty
 
 all: $(LIB) $(EXAMPLES)
 
