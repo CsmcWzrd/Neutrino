@@ -434,3 +434,7 @@ See `STAGE2_BEAUTY_RENDERING.md` for implementation notes and the theme asset ke
 ## Stage2 Win32 caret/theme fix pass
 
 The Stage2 package includes a Windows-focused fix pass for rich-text caret drift after newline deletion, theme-shaped row highlights, theme-shaped shadows, theme-shaped tab/progress highlights, and disabled hover fills for large/container controls such as rich text, read-only rich text, placements, scroll windows, list views, tree views, and multiline text boxes. See `STAGE2_WIN32_CARET_THEME_FIXES.md`.
+
+## Stage2 combo/font/theme fix pass
+
+This package includes a Stage2 fix pass for ComboBox drop-down behavior, ComboBox drop-down scrollbar rendering, logical font-family aliases (`Sans`, `Serif`, `SansSerif`, `Monospace`), MaterialDark off-white text, Win32 rich-text caret positioning after deletion, and active theme corner geometry for ListView/TableView/TreeView headers plus row/selection highlights.

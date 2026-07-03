@@ -174,7 +174,7 @@ Neu_Theme Neu_Theme::MaterialLight()
 
 Neu_Theme Neu_Theme::MaterialDark()
 {
-    Neu_Theme t = makeTheme({18, 18, 18, 255}, {30, 30, 34, 240}, {62, 66, 74, 255}, {238, 238, 238, 255}, {144, 202, 249, 255}, {64, 76, 92, 255}, {56, 60, 68, 255}, {0, 0, 0, 140}, {34, 34, 38, 250}, {144, 202, 249, 255}, 10, "Roboto:size=10:antialias=true:hinting=true:hintstyle=hintfull:rgba=rgb:lcdfilter=lcddefault");
+    Neu_Theme t = makeTheme({18, 18, 18, 255}, {30, 30, 34, 240}, {62, 66, 74, 255}, {232, 234, 237, 255}, {144, 202, 249, 255}, {64, 76, 92, 255}, {56, 60, 68, 255}, {0, 0, 0, 140}, {34, 34, 38, 250}, {144, 202, 249, 255}, 10, "Roboto:size=10:antialias=true:hinting=true:hintstyle=hintfull:rgba=rgb:lcdfilter=lcddefault");
     t.focus = {42, 112, 178, 255};
     t.controlGradientTop = {58, 62, 70, 255};
     t.controlGradientBottom = {22, 24, 30, 255};

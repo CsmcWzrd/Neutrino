@@ -208,10 +208,15 @@ void Neu_TreeView::draw(Display* display, Drawable drawable, GC gc, const Neu_Th
     XSetClipRectangles(display, gc, 0, 0, &clip, 1, Unsorted);
 
     const int headerBottom = std::min(viewportBottom, viewportTop + kTreeHeaderHeight);
-    XSetForeground(display, gc, Neu_Pixel(display, darkerTreeHeader(theme.glass)));
-    XFillRectangle(display, drawable, gc, viewportLeft, viewportTop,
-                   static_cast<unsigned int>(std::max(1, viewportRight - viewportLeft)),
-                   static_cast<unsigned int>(std::max(1, headerBottom - viewportTop)));
+    Neu_DrawSmoothRoundedRect(display, drawable, gc,
+                              darkerTreeHeader(theme.glass),
+                              theme.background,
+                              viewportLeft, viewportTop,
+                              std::max(1, viewportRight - viewportLeft),
+                              std::max(1, headerBottom - viewportTop),
+                              std::max(2, theme.radius - 2),
+                              true,
+                              theme.antiAliasSamples);
     const int headerX = rect.x + 8 - scrollX();
     const int headerRight = headerX + treeColumnWidth_;
     XSetForeground(display, gc, Neu_Pixel(display, theme.border));

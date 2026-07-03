@@ -195,10 +195,15 @@ void Neu_ListView::draw(Display* display, Drawable drawable, GC gc, const Neu_Th
 
     const int headerTop = viewportTop;
     const int headerBottom = std::min(viewportBottom, headerTop + headerH);
-    XSetForeground(display, gc, Neu_Pixel(display, darkerHeader(theme.glass)));
-    XFillRectangle(display, drawable, gc, viewportLeft, headerTop,
-                   static_cast<unsigned int>(std::max(1, viewportRight - viewportLeft)),
-                   static_cast<unsigned int>(std::max(1, headerBottom - headerTop)));
+    Neu_DrawSmoothRoundedRect(display, drawable, gc,
+                              darkerHeader(theme.glass),
+                              theme.background,
+                              viewportLeft, headerTop,
+                              std::max(1, viewportRight - viewportLeft),
+                              std::max(1, headerBottom - headerTop),
+                              std::max(2, theme.radius - 2),
+                              true,
+                              theme.antiAliasSamples);
 
     int x = rect.x + 8 - scrollX();
     for (size_t column = 0; column < cols; ++column) {

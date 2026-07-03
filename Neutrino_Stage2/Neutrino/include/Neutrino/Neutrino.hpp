@@ -68,6 +68,24 @@ enum class Neu_AntiAliasMode {
     SSAA   // super-sample shape antialiasing
 };
 
+enum class Neu_FontFamily {
+    Sans,
+    Serif,
+    SansSerif,
+    Monospace
+};
+
+inline std::string Neu_FontFamilyName(Neu_FontFamily family)
+{
+    switch (family) {
+    case Neu_FontFamily::Serif: return "Serif";
+    case Neu_FontFamily::SansSerif: return "SansSerif";
+    case Neu_FontFamily::Monospace: return "Monospace";
+    case Neu_FontFamily::Sans:
+    default: return "Sans";
+    }
+}
+
 struct Neu_TextOffset {
     int top{2};
     int right{4};
@@ -117,7 +135,7 @@ struct Neu_Theme {
     Neu_Color background{18,18,18,255};
     Neu_Color glass{30,30,34,235};
     Neu_Color border{62,66,74,255};
-    Neu_Color text{238,238,238,255};
+    Neu_Color text{232,234,237,255};
     Neu_Color accent{144,202,249,255};
     Neu_Color hover{42,44,50,255};
     Neu_Color pressed{56,60,68,255};
@@ -141,6 +159,9 @@ struct Neu_Theme {
     int shadowOffsetX{3};
     int shadowOffsetY{4};
     std::string fontName{"DejaVu Sans:size=10:antialias=true:hinting=true:hintstyle=hintfull:rgba=rgb:lcdfilter=lcddefault"};
+    Neu_FontFamily fontFamily{Neu_FontFamily::Sans};
+    void setFontFamily(Neu_FontFamily family) { fontFamily = family; fontName = Neu_FontFamilyName(family); }
+    void setFontFamily(Neu_FontFamily family, const std::string& concreteFontName) { fontFamily = family; fontName = concreteFontName.empty() ? Neu_FontFamilyName(family) : concreteFontName; }
     void setAllCorners(Neu_CornerStyle style) { topLeftCorner = style; topRightCorner = style; bottomLeftCorner = style; bottomRightCorner = style; }
     void setCornerStyles(Neu_CornerStyle topLeft, Neu_CornerStyle topRight, Neu_CornerStyle bottomLeft, Neu_CornerStyle bottomRight) { topLeftCorner = topLeft; topRightCorner = topRight; bottomLeftCorner = bottomLeft; bottomRightCorner = bottomRight; }
     void setRoundedCorners() { setAllCorners(Neu_CornerStyle::RoundedCorner); }
