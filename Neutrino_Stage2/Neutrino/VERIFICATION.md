@@ -170,3 +170,14 @@ The Visual Studio 2022 solution contains matching Stage2 projects and remains co
 
 Editable text controls now preserve repeated spaces/indentation and support `Ctrl+A`, `Ctrl+C`, `Ctrl+X`, `Ctrl+V`, Shift+arrow selection, and selection-aware Backspace/Delete. See `STAGE2_TEXT_SELECTION_CLIPBOARD_FIXES.md`.
 
+
+## Stage2 popup visibility verification
+
+Verified after adding `Neu_PopWindowMenu::show()`, `showAt()`, `hide()`, `toggle()`, and `isVisible()`:
+
+```sh
+make -j2 build/libNeutrino.a build/neutrino_test_07_popup_menu_categories
+cmake -S . -B /mnt/data/cmake-neutrino-popup
+cmake --build /mnt/data/cmake-neutrino-popup --target Neutrino neutrino_test_07_popup_menu_categories -j2
+make -f Makefile.autoconf -j2 build-autoconf/libNeutrino.a build-autoconf/neutrino_test_07_popup_menu_categories
+```

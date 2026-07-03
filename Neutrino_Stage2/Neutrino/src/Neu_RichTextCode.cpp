@@ -59,7 +59,7 @@ void Neu_RichTextCode::draw(Display* display, Drawable drawable, GC gc, const Ne
     if (toolbarVisible_) {
         XSetForeground(display, gc, Neu_Pixel(display, Neu_Color{224, 232, 244, 255}));
         XFillRectangle(display, drawable, gc, rect.x + 2, rect.y + 2, rect.width - 4, toolbarHeight - 3);
-        const char* tools[] = {"B", "I", "U", "S", "DS", "H1", "H2", "Mono", "Font", "Text", "BG", "HL", "Left", "Center", "Right", "Wrap"};
+        const char* tools[] = {"𝐁", "𝐼", "U̲", "S̶", "S̶̶", "H₁", "H₂", "⌨", "𝑓", "A", "▣", "▧", "⇤", "↔", "⇥", "↩"};
         int tx = rect.x + 8;
         for (const char* tool : tools) {
             XSetForeground(display, gc, Neu_Pixel(display, theme.border));
@@ -122,7 +122,10 @@ void Neu_RichTextCode::draw(Display* display, Drawable drawable, GC gc, const Ne
     } else {
         const auto sourceLines = splitPreserveLines(text());
         int lineNo = 1;
+        size_t logicalOffset = 0;
         for (const auto& line : sourceLines) {
+            const size_t lineStartOffset = logicalOffset;
+            const size_t lineEndOffset = std::min(text_.size(), lineStartOffset + line.size());
             auto lines = wordWrap_ ? wrapTextToWidth(display, drawable, gc, theme, line, contentWidth) : std::vector<std::string>{line};
             for (const auto& visualLine : lines) {
                 maxWidth = std::max(maxWidth, measureTextWidth(display, drawable, gc, theme, visualLine, false, false, true) + 80);
@@ -131,6 +134,18 @@ void Neu_RichTextCode::draw(Display* display, Drawable drawable, GC gc, const Ne
                     if (startsWithKeyword(line, "#include") || startsWithKeyword(line, "class") || startsWithKeyword(line, "int") || startsWithKeyword(line, "void") || startsWithKeyword(line, "auto")) {
                         XSetForeground(display, gc, Neu_Pixel(display, sketchHighlightColor_));
                         XFillRectangle(display, drawable, gc, rect.x + 50, y - 14, rect.width - 64, lineHeight);
+                    }
+                    if (focused_ && hasSelection() && !wordWrap_) {
+                        const size_t selA = selectionStart();
+                        const size_t selB = selectionEnd();
+                        if (selB > lineStartOffset && selA < lineEndOffset) {
+                            const size_t localA = std::max(selA, lineStartOffset) - lineStartOffset;
+                            const size_t localB = std::min(selB, lineEndOffset) - lineStartOffset;
+                            const int sx = contentLeft - scrollX() + measureTextWidth(display, drawable, gc, theme, line.substr(0, localA), false, false, true);
+                            const int ex = contentLeft - scrollX() + measureTextWidth(display, drawable, gc, theme, line.substr(0, localB), false, false, true);
+                            XSetForeground(display, gc, Neu_Pixel(display, theme.highlight));
+                            XFillRectangle(display, drawable, gc, std::min(sx, ex), y - lineHeight + 4, std::max(1, std::abs(ex - sx)), lineHeight);
+                        }
                     }
                     drawTextColored(display,
                                     drawable,
@@ -149,6 +164,14 @@ void Neu_RichTextCode::draw(Display* display, Drawable drawable, GC gc, const Ne
                 }
                 y += lineHeight;
                 naturalHeight += lineHeight;
+            }
+            logicalOffset = lineEndOffset;
+            if (logicalOffset < text_.size()) {
+                if (text_[logicalOffset] == '\r' && logicalOffset + 1 < text_.size() && text_[logicalOffset + 1] == '\n') {
+                    logicalOffset += 2;
+                } else if (text_[logicalOffset] == '\r' || text_[logicalOffset] == '\n') {
+                    ++logicalOffset;
+                }
             }
             ++lineNo;
         }
@@ -237,6 +260,7 @@ void Neu_RichTextCode::handleXEvent(XEvent& event)
                 deleteSelection();
                 requestRedraw();
             } else if (cursor_ > 0 && !text_.empty()) {
+                pushUndoSnapshot();
                 cursor_ = std::min(cursor_, text_.size());
                 size_t eraseAt = cursor_ - 1;
                 size_t eraseCount = 1;

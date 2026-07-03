@@ -20,6 +20,42 @@ Neu_Application::~Neu_Application()
     current_ = nullptr;
 }
 
+bool Neu_Application::detectWayland()
+{
+    const char* forceX11 = std::getenv("NEUTRINO_USE_X11");
+    if (forceX11 && std::strcmp(forceX11, "1") == 0) {
+        return false;
+    }
+
+    const char* waylandDisplay = std::getenv("WAYLAND_DISPLAY");
+    if (!waylandDisplay || !*waylandDisplay) {
+        return false;
+    }
+
+    void* library = dlopen("libwayland-client.so.0", RTLD_LAZY);
+    if (!library) {
+        library = dlopen("libwayland-client.so", RTLD_LAZY);
+    }
+    if (!library) {
+        return false;
+    }
+
+    using ConnectFn = void* (*)(const char*);
+    using DisconnectFn = void (*)(void*);
+    auto connect = reinterpret_cast<ConnectFn>(dlsym(library, "wl_display_connect"));
+    auto disconnect = reinterpret_cast<DisconnectFn>(dlsym(library, "wl_display_disconnect"));
+    bool available = false;
+    if (connect && disconnect) {
+        void* wl = connect(nullptr);
+        if (wl) {
+            available = true;
+            disconnect(wl);
+        }
+    }
+    dlclose(library);
+    return available;
+}
+
 bool Neu_Application::detectXRender()
 {
     if (!display_) {
@@ -45,6 +81,20 @@ bool Neu_Application::detectXRender()
 
 bool Neu_Application::open()
 {
+    waylandAvailable_ = detectWayland();
+    const char* forceX11 = std::getenv("NEUTRINO_USE_X11");
+    const bool useX11 = forceX11 && std::strcmp(forceX11, "1") == 0;
+    if (!useX11 && waylandAvailable_) {
+        // Stage2 uses the existing renderer through an XWayland bridge when present.
+        // The application still chooses the Wayland session path by default and only
+        // forces plain X11 when NEUTRINO_USE_X11=1 is set.
+        backend_ = Neu_Backend::Wayland;
+        backendName_ = "Wayland/XWayland";
+    } else {
+        backend_ = Neu_Backend::X11;
+        backendName_ = "X11";
+    }
+
     display_ = XOpenDisplay(nullptr);
     if (!display_) {
         return false;
@@ -65,6 +115,18 @@ bool Neu_Application::open()
 Neu_Application* Neu_Application::current()
 {
     return current_;
+}
+
+const char* Neu_SelectedBackendName()
+{
+    auto* app = Neu_Application::current();
+    return app ? app->backendName().c_str() : "unopened";
+}
+
+bool Neu_IsWaylandBackendSelected()
+{
+    auto* app = Neu_Application::current();
+    return app && app->usingWayland();
 }
 
 void Neu_Application::quit()

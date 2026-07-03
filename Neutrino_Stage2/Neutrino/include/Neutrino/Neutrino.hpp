@@ -75,6 +75,22 @@ enum class Neu_FontFamily {
     Monospace
 };
 
+enum class Neu_Backend {
+    Auto,
+    Wayland,
+    X11,
+    Win32
+};
+
+struct Neu_TextEditSnapshot {
+    std::string text;
+    size_t cursor{0};
+    size_t selectionStart{0};
+    size_t selectionEnd{0};
+    int scrollX{0};
+    int scrollY{0};
+};
+
 inline std::string Neu_FontFamilyName(Neu_FontFamily family)
 {
     switch (family) {
@@ -263,8 +279,12 @@ public:
     bool hasWindows() const { return !windows_.empty(); }
     static Neu_Application* current();
     bool xrenderAvailable() const { return xrenderAvailable_; }
+    Neu_Backend backend() const { return backend_; }
+    bool usingWayland() const { return backend_ == Neu_Backend::Wayland; }
+    const std::string& backendName() const { return backendName_; }
 private:
     bool detectXRender();
+    bool detectWayland();
 #ifdef _WIN32
     Display* display_{nullptr};
     int screen_{0};
@@ -274,6 +294,9 @@ private:
     int screen_{0};
     bool xrenderAvailable_{false};
 #endif
+    Neu_Backend backend_{Neu_Backend::Auto};
+    std::string backendName_{"auto"};
+    bool waylandAvailable_{false};
     bool running_{false};
     std::vector<Neu_Window*> windows_;
     static Neu_Application* current_;
@@ -394,6 +417,10 @@ public:
     void clearSelection();
     void setSelection(size_t start, size_t end);
     bool hasSelection() const;
+    void undo();
+    void redo();
+    bool canUndo() const { return !undoStack_.empty(); }
+    bool canRedo() const { return !redoStack_.empty(); }
     std::string selectedText() const;
     size_t selectionStart() const { return std::min(selectionStart_, selectionEnd_); }
     size_t selectionEnd() const { return std::max(selectionStart_, selectionEnd_); }
@@ -401,10 +428,15 @@ protected:
     void replaceSelectionWith(const std::string& text);
     void deleteSelection();
     void moveCursorWithSelection(size_t newCursor, bool extendSelection);
+    void pushUndoSnapshot();
+    void restoreEditSnapshot(const Neu_TextEditSnapshot& snapshot);
     size_t cursor_{0};
     int textScrollX_{0};
     size_t selectionStart_{0};
     size_t selectionEnd_{0};
+    std::vector<Neu_TextEditSnapshot> undoStack_;
+    std::vector<Neu_TextEditSnapshot> redoStack_;
+    size_t undoLimit_{256};
 };
 
 class Neu_Passwordbox : public Neu_Textbox {
@@ -541,14 +573,27 @@ class Neu_PopWindowMenu : public Neu_Placement {
 public:
     using Neu_Placement::Neu_Placement;
     const char* className() const override { return "Neu_PopWindowMenu"; }
-    void setCategories(const std::vector<std::string>& categories) { categories_ = categories; }
-    void setItems(const std::string& category, const std::vector<std::string>& items) { items_[category] = items; }
+    void setCategories(const std::vector<std::string>& categories) { categories_ = categories; requestRedraw(); }
+    void setItems(const std::string& category, const std::vector<std::string>& items) { items_[category] = items; requestRedraw(); }
+
+    // Popup visibility helpers. The menu remains visible by default for
+    // backwards compatibility with existing demos; applications can hide it
+    // after construction and open it explicitly through show()/showAt().
+    void show() { if (!visible_) { visible_ = true; requestRedraw(); } }
+    void showAt(int x, int y) { layout_.left = x; layout_.top = y; show(); }
+    void hide() { if (visible_) { visible_ = false; requestRedraw(); } }
+    void toggle() { if (visible_) { hide(); } else { show(); } }
+    bool isVisible() const { return visible_; }
+
     void draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme) override;
+    void handleXEvent(XEvent& ev) override;
 private:
     std::vector<std::string> categories_;
     std::map<std::string, std::vector<std::string>> items_;
     int selectedCategory_{0};
 };
+
+using Neu_PopupWindowMenu = Neu_PopWindowMenu;
 
 
 class Neu_ScrollBar : public Neu_Control {
@@ -857,6 +902,8 @@ private:
 
 unsigned long Neu_Pixel(Display* d, const Neu_Color& color);
 Neu_Color Neu_PixelToColor(Display* d, unsigned long pixel);
+const char* Neu_SelectedBackendName();
+bool Neu_IsWaylandBackendSelected();
 void Neu_SetSmoothGraphicsOptions(const Neu_SmoothGraphicsOptions& options);
 Neu_SmoothGraphicsOptions Neu_GetSmoothGraphicsOptions();
 void Neu_EnableAntialiasing(bool enabled);

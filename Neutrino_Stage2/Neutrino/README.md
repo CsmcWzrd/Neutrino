@@ -442,3 +442,37 @@ This package includes a Stage2 fix pass for ComboBox drop-down behavior, ComboBo
 
 Editable text controls now preserve repeated spaces/indentation and support `Ctrl+A`, `Ctrl+C`, `Ctrl+X`, `Ctrl+V`, Shift+arrow selection, and selection-aware Backspace/Delete. See `STAGE2_TEXT_SELECTION_CLIPBOARD_FIXES.md`.
 
+
+## Stage2 Wayland, selection, undo/redo, and Unicode toolbar update
+
+On Linux, Neutrino now prefers the Wayland session path by default when Wayland is available. To force the X11 path, run with:
+
+```sh
+NEUTRINO_USE_X11=1 ./build/neutrino_demo
+```
+
+The current Stage2 Linux renderer uses the existing X11 drawing path through Wayland/XWayland when a Wayland session is selected. Applications can inspect the runtime backend with:
+
+```cpp
+neutrino::Neu_SelectedBackendName();
+neutrino::Neu_IsWaylandBackendSelected();
+```
+
+Editable text controls now draw visible selection highlight rectangles and support Undo/Redo with `Ctrl+Z`, `Ctrl+Shift+Z`, `Ctrl+Y`, and `Alt+Backspace`. The RichTextCode toolbar now uses Unicode symbols such as `𝐁`, `𝐼`, `U̲`, `S̶`, `H₁`, `⌨`, `⇤`, `↔`, `⇥`, and `↩`.
+
+See `STAGE2_WAYLAND_SELECTION_UNDO_FIXES.md`.
+
+## Stage2 popup visibility update
+
+`Neu_PopWindowMenu` now has explicit popup-style visibility helpers and the alias `Neu_PopupWindowMenu`:
+
+```cpp
+menu->show();
+menu->showAt(120, 80);
+menu->hide();
+menu->toggle();
+bool open = menu->isVisible();
+```
+
+The control is still visible by default for compatibility. Call `hide()` after construction when popup behavior is desired. The popup-menu test application includes Show, Hide, and Toggle buttons.
+

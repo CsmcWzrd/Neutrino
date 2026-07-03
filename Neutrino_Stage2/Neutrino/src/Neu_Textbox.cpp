@@ -57,11 +57,63 @@ std::string Neu_Textbox::selectedText() const
     return text_.substr(a, b - a);
 }
 
+void Neu_Textbox::pushUndoSnapshot()
+{
+    Neu_TextEditSnapshot snapshot{text_, cursor_, selectionStart_, selectionEnd_, scrollX_, scrollY_};
+    if (!undoStack_.empty()) {
+        const auto& last = undoStack_.back();
+        if (last.text == snapshot.text && last.cursor == snapshot.cursor &&
+            last.selectionStart == snapshot.selectionStart && last.selectionEnd == snapshot.selectionEnd) {
+            return;
+        }
+    }
+    undoStack_.push_back(snapshot);
+    if (undoStack_.size() > undoLimit_) {
+        undoStack_.erase(undoStack_.begin());
+    }
+    redoStack_.clear();
+}
+
+void Neu_Textbox::restoreEditSnapshot(const Neu_TextEditSnapshot& snapshot)
+{
+    text_ = snapshot.text;
+    cursor_ = std::min(snapshot.cursor, text_.size());
+    selectionStart_ = std::min(snapshot.selectionStart, text_.size());
+    selectionEnd_ = std::min(snapshot.selectionEnd, text_.size());
+    scrollX_ = std::max(0, snapshot.scrollX);
+    scrollY_ = std::max(0, snapshot.scrollY);
+    invokeTextChanged();
+    requestRedraw();
+}
+
+void Neu_Textbox::undo()
+{
+    if (undoStack_.empty()) {
+        return;
+    }
+    redoStack_.push_back({text_, cursor_, selectionStart_, selectionEnd_, scrollX_, scrollY_});
+    Neu_TextEditSnapshot snapshot = undoStack_.back();
+    undoStack_.pop_back();
+    restoreEditSnapshot(snapshot);
+}
+
+void Neu_Textbox::redo()
+{
+    if (redoStack_.empty()) {
+        return;
+    }
+    undoStack_.push_back({text_, cursor_, selectionStart_, selectionEnd_, scrollX_, scrollY_});
+    Neu_TextEditSnapshot snapshot = redoStack_.back();
+    redoStack_.pop_back();
+    restoreEditSnapshot(snapshot);
+}
+
 void Neu_Textbox::deleteSelection()
 {
     if (!hasSelection()) {
         return;
     }
+    pushUndoSnapshot();
     const size_t a = selectionStart();
     const size_t b = selectionEnd();
     text_.erase(a, b - a);
@@ -73,6 +125,7 @@ void Neu_Textbox::deleteSelection()
 
 void Neu_Textbox::replaceSelectionWith(const std::string& text)
 {
+    pushUndoSnapshot();
     if (hasSelection()) {
         const size_t a = selectionStart();
         const size_t b = selectionEnd();
@@ -208,11 +261,28 @@ void Neu_Textbox::handleXEvent(XEvent& event)
             requestRedraw();
             return;
         }
+        if (ctrl && (keySymbol == XK_z || keySymbol == XK_Z)) {
+            if (shift) {
+                redo();
+            } else {
+                undo();
+            }
+            return;
+        }
+        if (ctrl && (keySymbol == XK_y || keySymbol == XK_Y)) {
+            redo();
+            return;
+        }
+        if ((event.xkey.state & Mod1Mask) && keySymbol == XK_BackSpace) {
+            redo();
+            return;
+        }
 
         if (keySymbol == XK_BackSpace) {
             if (hasSelection()) {
                 deleteSelection();
             } else if (cursor_ > 0 && !text_.empty()) {
+                pushUndoSnapshot();
                 text_.erase(cursor_ - 1, 1);
                 --cursor_;
                 clearSelection();
@@ -222,6 +292,7 @@ void Neu_Textbox::handleXEvent(XEvent& event)
             if (hasSelection()) {
                 deleteSelection();
             } else if (cursor_ < text_.size()) {
+                pushUndoSnapshot();
                 text_.erase(cursor_, 1);
                 clearSelection();
                 invokeTextChanged();
