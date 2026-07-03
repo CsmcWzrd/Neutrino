@@ -68,3 +68,9 @@ Every `msvc/*.vcxproj` file uses Visual Studio 2022 toolset `v143`, C++17 mode v
 
 Editable text controls now preserve repeated spaces/indentation and support `Ctrl+A`, `Ctrl+C`, `Ctrl+X`, `Ctrl+V`, Shift+arrow selection, and selection-aware Backspace/Delete. See `STAGE2_TEXT_SELECTION_CLIPBOARD_FIXES.md`.
 
+
+
+## Stage2 rich text focused tests
+
+- `neutrino_test_20_full_richtext_control`: full-window rich-text editing, toolbar formatting, selection, clipboard, drag selection, and undo/redo.
+- `neutrino_test_21_full_richtext_code_control`: full-window code-oriented rich text editor with toolbar formatting, code text, selection, clipboard, and undo/redo.

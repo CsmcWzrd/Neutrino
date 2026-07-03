@@ -645,6 +645,7 @@ ac_subst_vars='LTLIBOBJS
 LIBOBJS
 DL_LIBS
 X11_LIBS
+NEUTRINO_USE_X11
 RANLIB
 AR
 OBJEXT
@@ -705,7 +706,8 @@ CXXFLAGS
 LDFLAGS
 LIBS
 CPPFLAGS
-CCC'
+CCC
+NEUTRINO_USE_X11'
 
 
 # Initialize some variables set by options.
@@ -1328,6 +1330,9 @@ Some influential environment variables:
   LIBS        libraries to pass to the linker, e.g. -l<library>
   CPPFLAGS    (Objective) C/C++ preprocessor flags, e.g. -I<include dir> if
               you have headers in a nonstandard directory <include dir>
+  NEUTRINO_USE_X11
+              Set to 1 to force X11 preference; set to 0 or leave unset to
+              prefer Wayland when available
 
 Use these variables to override the choices made by 'configure' or to help
 it to find libraries and programs with nonstandard names/locations.
@@ -2989,6 +2994,7 @@ ac_compile='$CXX -c $CXXFLAGS $CPPFLAGS conftest.$ac_ext >&5'
 ac_link='$CXX -o conftest$ac_exeext $CXXFLAGS $CPPFLAGS $LDFLAGS conftest.$ac_ext $LIBS >&5'
 ac_compiler_gnu=$ac_cv_cxx_compiler_gnu
 
+PKG_PROG_PKG_CONFIG
 { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking whether the C++ compiler supports C++17" >&5
 printf %s "checking whether the C++ compiler supports C++17... " >&6; }
 save_CXXFLAGS="$CXXFLAGS"
@@ -3018,6 +3024,18 @@ esac
 fi
 rm -f core conftest.err conftest.$ac_objext conftest.beam conftest.$ac_ext
 CXXFLAGS="$save_CXXFLAGS"
+
+if test "x$NEUTRINO_USE_X11" = "x1"
+then :
+  { printf "%s\n" "$as_me:${as_lineno-$LINENO}: NEUTRINO_USE_X11=1: forcing X11 preference" >&5
+printf "%s\n" "$as_me: NEUTRINO_USE_X11=1: forcing X11 preference" >&6;}
+else case e in #(
+  e) PKG_CHECK_MODULES(WAYLAND_CLIENT, wayland-client,
+     AC_DEFINE([NEUTRINO_PREFER_WAYLAND], [1], [Prefer Wayland-capable Linux backend selection])
+      AC_MSG_NOTICE([Wayland client found: Wayland-capable path is preferred]),
+     AC_MSG_NOTICE([Wayland client metadata not found: falling back to X11/XWayland-compatible build])) ;;
+esac
+fi
 ac_header= ac_cache=
 for ac_item in $ac_header_cxx_list
 do
@@ -3060,7 +3078,7 @@ _ACEOF
 else case e in #(
   e) { { printf "%s\n" "$as_me:${as_lineno-$LINENO}: error: in '$ac_pwd':" >&5
 printf "%s\n" "$as_me: error: in '$ac_pwd':" >&2;}
-as_fn_error $? "X11/Xlib.h and dlfcn.h are required
+as_fn_error $? "X11/Xlib.h and dlfcn.h are required for the Stage2 X11/XWayland renderer
 See 'config.log' for more details" "$LINENO" 5; } ;;
 esac
 fi

@@ -133,6 +133,14 @@ void Neu_Textbox::replaceSelectionWith(const std::string& text)
         cursor_ = a + text.size();
     } else {
         cursor_ = std::min(cursor_, text_.size());
+        if (insertMode_ && !text.empty() && text.find('\n') == std::string::npos && text.find('\r') == std::string::npos && cursor_ < text_.size()) {
+            const size_t overwriteCount = std::min(text.size(), text_.size() - cursor_);
+            size_t actual = 0;
+            while (actual < overwriteCount && cursor_ + actual < text_.size() && text_[cursor_ + actual] != '\n' && text_[cursor_ + actual] != '\r') {
+                ++actual;
+            }
+            text_.erase(cursor_, actual);
+        }
         text_.insert(cursor_, text);
         cursor_ += text.size();
     }
@@ -214,9 +222,9 @@ void Neu_Textbox::draw(Display* display, Drawable drawable, GC gc, const Neu_The
 
 void Neu_Textbox::handleXEvent(XEvent& event)
 {
-    if (event.type == ButtonPress && contains(event.xbutton.x, event.xbutton.y)) {
+    auto cursorFromPoint = [&](int px) -> size_t {
         const auto rect = bounds();
-        const int localX = event.xbutton.x - (rect.x + 8) + textScrollX_;
+        const int localX = px - (rect.x + 8) + textScrollX_;
         size_t newCursor = 0;
         for (size_t i = 1; i <= text_.size(); ++i) {
             if (measureTextWidth(nullptr, 0, 0, Neu_Theme{}, text_.substr(0, i)) <= localX) {
@@ -225,7 +233,77 @@ void Neu_Textbox::handleXEvent(XEvent& event)
                 break;
             }
         }
-        moveCursorWithSelection(newCursor, (event.xbutton.state & ShiftMask) != 0);
+        return newCursor;
+    };
+
+    if (event.type == ButtonPress && contains(event.xbutton.x, event.xbutton.y)) {
+        const size_t newCursor = cursorFromPoint(event.xbutton.x);
+        if (!(event.xbutton.state & ShiftMask) && hasSelection() && newCursor >= selectionStart() && newCursor <= selectionEnd()) {
+            mouseDraggingSelectedText_ = true;
+            mouseSelecting_ = false;
+            dragSourceStart_ = selectionStart();
+            dragSourceEnd_ = selectionEnd();
+            dragText_ = selectedText();
+            dragDropCursor_ = newCursor;
+            cursor_ = newCursor;
+            requestRedraw();
+            return;
+        }
+        mouseDraggingSelectedText_ = false;
+        mouseSelecting_ = true;
+        mouseSelectAnchor_ = (event.xbutton.state & ShiftMask) ? selectionStart() : newCursor;
+        if (event.xbutton.state & ShiftMask) {
+            moveCursorWithSelection(newCursor, true);
+        } else {
+            moveCursorWithSelection(newCursor, false);
+            mouseSelectAnchor_ = newCursor;
+        }
+        return;
+    }
+
+    if (event.type == MotionNotify && focused_) {
+        const size_t newCursor = cursorFromPoint(event.xmotion.x);
+        if (mouseDraggingSelectedText_) {
+            dragDropCursor_ = newCursor;
+            cursor_ = newCursor;
+            requestRedraw();
+            return;
+        }
+        if (mouseSelecting_) {
+            selectionStart_ = mouseSelectAnchor_;
+            selectionEnd_ = newCursor;
+            cursor_ = newCursor;
+            requestRedraw();
+            return;
+        }
+    }
+
+    if (event.type == ButtonRelease && mouseDraggingSelectedText_) {
+        mouseDraggingSelectedText_ = false;
+        if (!dragText_.empty() && dragSourceStart_ < dragSourceEnd_ && dragSourceEnd_ <= text_.size()) {
+            size_t drop = std::min(dragDropCursor_, text_.size());
+            if (drop < dragSourceStart_ || drop > dragSourceEnd_) {
+                pushUndoSnapshot();
+                text_.erase(dragSourceStart_, dragSourceEnd_ - dragSourceStart_);
+                if (drop > dragSourceEnd_) {
+                    drop -= (dragSourceEnd_ - dragSourceStart_);
+                }
+                drop = std::min(drop, text_.size());
+                text_.insert(drop, dragText_);
+                cursor_ = drop + dragText_.size();
+                selectionStart_ = drop;
+                selectionEnd_ = cursor_;
+                invokeTextChanged();
+            }
+        }
+        dragText_.clear();
+        requestRedraw();
+        return;
+    }
+
+    if (event.type == ButtonRelease && mouseSelecting_) {
+        mouseSelecting_ = false;
+        requestRedraw();
         return;
     }
 
@@ -274,7 +352,14 @@ void Neu_Textbox::handleXEvent(XEvent& event)
             return;
         }
         if ((event.xkey.state & Mod1Mask) && keySymbol == XK_BackSpace) {
-            redo();
+            // Alt+Backspace follows the common editing convention: Undo.
+            undo();
+            return;
+        }
+
+        if (keySymbol == XK_Insert) {
+            insertMode_ = !insertMode_;
+            requestRedraw();
             return;
         }
 
@@ -304,6 +389,10 @@ void Neu_Textbox::handleXEvent(XEvent& event)
         } else if (keySymbol == XK_Home) {
             moveCursorWithSelection(0, shift);
         } else if (keySymbol == XK_End) {
+            moveCursorWithSelection(text_.size(), shift);
+        } else if (keySymbol == XK_Page_Up) {
+            moveCursorWithSelection(0, shift);
+        } else if (keySymbol == XK_Page_Down) {
             moveCursorWithSelection(text_.size(), shift);
         } else if (keySymbol == XK_Return) {
             // Single-line text boxes ignore Enter. Multiline boxes override this.

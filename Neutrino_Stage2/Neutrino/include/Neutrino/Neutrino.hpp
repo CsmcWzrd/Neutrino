@@ -424,6 +424,8 @@ public:
     std::string selectedText() const;
     size_t selectionStart() const { return std::min(selectionStart_, selectionEnd_); }
     size_t selectionEnd() const { return std::max(selectionStart_, selectionEnd_); }
+    void setInsertMode(bool enabled) { insertMode_ = enabled; requestRedraw(); }
+    bool insertMode() const { return insertMode_; }
 protected:
     void replaceSelectionWith(const std::string& text);
     void deleteSelection();
@@ -437,6 +439,14 @@ protected:
     std::vector<Neu_TextEditSnapshot> undoStack_;
     std::vector<Neu_TextEditSnapshot> redoStack_;
     size_t undoLimit_{256};
+    bool insertMode_{false};
+    bool mouseSelecting_{false};
+    size_t mouseSelectAnchor_{0};
+    bool mouseDraggingSelectedText_{false};
+    size_t dragSourceStart_{0};
+    size_t dragSourceEnd_{0};
+    size_t dragDropCursor_{0};
+    std::string dragText_;
 };
 
 class Neu_Passwordbox : public Neu_Textbox {
@@ -650,9 +660,22 @@ public:
     void setDefaultFontColor(const Neu_Color& color) { defaultFontColor_ = color; requestRedraw(); }
     void setDefaultBackgroundColor(const Neu_Color& color) { defaultBackgroundColor_ = color; requestRedraw(); }
     void setSketchHighlightColor(const Neu_Color& color) { sketchHighlightColor_ = color; requestRedraw(); }
+    void applyToolbarAction(int actionIndex);
+    void applyBold() { applyToolbarAction(0); }
+    void applyItalic() { applyToolbarAction(1); }
+    void applyUnderline() { applyToolbarAction(2); }
+    void applyStrikethrough() { applyToolbarAction(3); }
+    void applyDoubleStrikethrough() { applyToolbarAction(4); }
+    void applyHeading(int level);
+    void applyMonospace() { applyToolbarAction(7); }
+    void cycleToolbarFont() { applyToolbarAction(8); }
+    void applyFontColor(const Neu_Color& color);
+    void applyBackgroundColor(const Neu_Color& color);
+    void applyHighlightColor(const Neu_Color& color);
     void draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme) override;
     void handleXEvent(XEvent& ev) override;
 private:
+    void applyFragmentStyleToSelection(const Neu_TextFragment& style);
     bool readOnly_{false};
     bool toolbarVisible_{true};
     std::string languageName_{"C++17"};
@@ -660,6 +683,8 @@ private:
     Neu_Color defaultFontColor_{20,28,38,255};
     Neu_Color defaultBackgroundColor_{255,255,255,0};
     Neu_Color sketchHighlightColor_{255,240,120,160};
+    std::vector<std::string> toolbarFonts_{"Sans", "Serif", "SansSerif", "Monospace"};
+    int toolbarFontIndex_{0};
 };
 
 class Neu_ProgressSquare : public Neu_Control {

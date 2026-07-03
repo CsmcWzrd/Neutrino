@@ -1994,6 +1994,14 @@ void Neu_Textbox::replaceSelectionWith(const std::string& text)
         cursor_ = a + text.size();
     } else {
         cursor_ = std::min(cursor_, text_.size());
+        if (insertMode_ && !text.empty() && text.find('\n') == std::string::npos && text.find('\r') == std::string::npos && cursor_ < text_.size()) {
+            const size_t overwriteCount = std::min(text.size(), text_.size() - cursor_);
+            size_t actual = 0;
+            while (actual < overwriteCount && cursor_ + actual < text_.size() && text_[cursor_ + actual] != '\n' && text_[cursor_ + actual] != '\r') {
+                ++actual;
+            }
+            text_.erase(cursor_, actual);
+        }
         text_.insert(cursor_, text);
         cursor_ += text.size();
     }
@@ -2111,7 +2119,57 @@ void Neu_Textbox::handleXEvent(XEvent& ev)
             }
             ReleaseDC(parent_->xid(), hdc);
         }
-        moveCursorWithSelection(newCursor, shiftDownWin32());
+        mouseSelecting_ = true;
+        mouseSelectAnchor_ = shiftDownWin32() ? selectionStart() : newCursor;
+        if (shiftDownWin32()) {
+            moveCursorWithSelection(newCursor, true);
+        } else {
+            moveCursorWithSelection(newCursor, false);
+            mouseSelectAnchor_ = newCursor;
+        }
+        return;
+    }
+
+    if (ev.message == WM_MOUSEMOVE && mouseSelecting_ && focused_) {
+        Neu_Rect r = bounds();
+        const int textLeft = r.x + 10;
+        const int localX = ev.x - textLeft + textScrollX_;
+        size_t newCursor = 0;
+        HDC hdc = parent_ && parent_->xid() ? GetDC(parent_->xid()) : nullptr;
+        HGDIOBJ oldFont = nullptr;
+        if (hdc) {
+            oldFont = SelectObject(hdc, uiFont());
+        }
+        for (size_t i = 1; i <= text_.size(); ++i) {
+            int w = static_cast<int>(i) * 8;
+            if (hdc) {
+                const std::wstring prefix = toWide(text_.substr(0, i));
+                SIZE sz{};
+                GetTextExtentPoint32W(hdc, prefix.c_str(), static_cast<int>(prefix.size()), &sz);
+                w = sz.cx;
+            }
+            if (w <= localX) {
+                newCursor = i;
+            } else {
+                break;
+            }
+        }
+        if (hdc) {
+            if (oldFont) {
+                SelectObject(hdc, oldFont);
+            }
+            ReleaseDC(parent_->xid(), hdc);
+        }
+        selectionStart_ = mouseSelectAnchor_;
+        selectionEnd_ = newCursor;
+        cursor_ = newCursor;
+        requestRedraw();
+        return;
+    }
+
+    if (ev.message == WM_LBUTTONUP && mouseSelecting_) {
+        mouseSelecting_ = false;
+        requestRedraw();
         return;
     }
 
@@ -2160,11 +2218,22 @@ void Neu_Textbox::handleXEvent(XEvent& ev)
             }
         }
         if (altDownWin32() && ev.wParam == VK_BACK) {
-            redo();
+            // Alt+Backspace follows the common editing convention: Undo.
+            undo();
             return;
         }
         const bool shift = shiftDownWin32();
         switch (ev.wParam) {
+        case VK_INSERT:
+            insertMode_ = !insertMode_;
+            requestRedraw();
+            break;
+        case VK_PRIOR:
+            moveCursorWithSelection(0, shift);
+            break;
+        case VK_NEXT:
+            moveCursorWithSelection(text_.size(), shift);
+            break;
         case VK_LEFT:
             moveCursorWithSelection(cursor_ > 0 ? cursor_ - 1 : 0, shift);
             break;
@@ -2317,30 +2386,85 @@ void Neu_Multilinetextbox::draw(Display* d, Drawable drawable, GC gc, const Neu_
 
 void Neu_Multilinetextbox::handleXEvent(XEvent& ev)
 {
-    if (ev.message == WM_LBUTTONDOWN && contains(ev.x, ev.y)) {
-        Neu_Control::handleXEvent(ev);
-        if (activeScrollDrag_ != 0) {
-            return;
-        }
-
+    auto cursorFromPoint = [&](int px, int py) -> size_t {
         Neu_Rect r = bounds();
         constexpr int lineHeight = 20;
         const int contentLeft = r.x + 10;
         const int contentTop = r.y + 8;
-        const int desiredLine = std::max(0, (ev.y - contentTop + scrollY_) / lineHeight);
-        const int localX = ev.x - contentLeft + (wordWrap_ ? 0 : scrollX_);
+        const int desiredLine = std::max(0, (py - contentTop + scrollY_) / lineHeight);
+        const int localX = px - contentLeft + (wordWrap_ ? 0 : scrollX_);
         const auto lines = logicalLinesWin32(text_);
         const int clampedLine = std::min(desiredLine, std::max(0, static_cast<int>(lines.size()) - 1));
         const size_t start = lineStartOffsetWin32(text_, clampedLine);
         const size_t end = lineEndOffsetWin32(text_, start);
-
         HDC hdc = parent_ && parent_->xid() ? GetDC(parent_->xid()) : nullptr;
         const size_t newCursor = static_cast<size_t>(byteOffsetFromXWin32(hdc, text_, start, end, localX, false));
         if (hdc) {
             ReleaseDC(parent_->xid(), hdc);
         }
-        moveCursorWithSelection(newCursor, shiftDownWin32());
+        return newCursor;
+    };
+
+    if (ev.message == WM_LBUTTONDOWN && contains(ev.x, ev.y)) {
+        Neu_Control::handleXEvent(ev);
+        if (activeScrollDrag_ != 0) {
+            return;
+        }
+        const size_t newCursor = cursorFromPoint(ev.x, ev.y);
+        mouseSelecting_ = true;
+        mouseSelectAnchor_ = shiftDownWin32() ? selectionStart() : newCursor;
+        if (shiftDownWin32()) {
+            moveCursorWithSelection(newCursor, true);
+        } else {
+            moveCursorWithSelection(newCursor, false);
+            mouseSelectAnchor_ = newCursor;
+        }
         return;
+    }
+
+    if (ev.message == WM_MOUSEMOVE && mouseSelecting_ && focused_) {
+        const size_t newCursor = cursorFromPoint(ev.x, ev.y);
+        selectionStart_ = mouseSelectAnchor_;
+        selectionEnd_ = newCursor;
+        cursor_ = newCursor;
+        requestRedraw();
+        return;
+    }
+
+    if (ev.message == WM_LBUTTONUP && mouseSelecting_) {
+        mouseSelecting_ = false;
+        requestRedraw();
+        return;
+    }
+
+    if (focused_ && ev.message == WM_KEYDOWN) {
+        const bool shift = shiftDownWin32();
+        size_t lineIndex = 0;
+        size_t lineStart = 0;
+        caretLinePrefixWin32(text_, std::min(cursor_, text_.size()), lineIndex, lineStart);
+        const size_t lineEnd = lineEndOffsetWin32(text_, lineStart);
+        if (ev.wParam == VK_HOME) {
+            moveCursorWithSelection(lineStart, shift);
+            return;
+        }
+        if (ev.wParam == VK_END) {
+            moveCursorWithSelection(lineEnd, shift);
+            return;
+        }
+        if (ev.wParam == VK_PRIOR || ev.wParam == VK_NEXT) {
+            constexpr int lineHeight = 20;
+            const Neu_Rect r = bounds();
+            const int pageLines = std::max(1, (r.height - 16) / lineHeight);
+            int targetLine = static_cast<int>(lineIndex) + (ev.wParam == VK_PRIOR ? -pageLines : pageLines);
+            const auto lines = logicalLinesWin32(text_);
+            targetLine = std::max(0, std::min(targetLine, std::max(0, static_cast<int>(lines.size()) - 1)));
+            const size_t targetStart = lineStartOffsetWin32(text_, targetLine);
+            const size_t targetEnd = lineEndOffsetWin32(text_, targetStart);
+            const size_t currentCol = cursor_ >= lineStart ? cursor_ - lineStart : 0;
+            moveCursorWithSelection(std::min(targetStart + currentCol, targetEnd), shift);
+            setScrollOffset(scrollX(), scrollY() + (ev.wParam == VK_PRIOR ? -pageLines * lineHeight : pageLines * lineHeight));
+            return;
+        }
     }
 
     if (focused_ && ev.message == WM_CHAR && (ev.wParam == L'\r' || ev.wParam == L'\n')) {
@@ -3641,6 +3765,104 @@ void Neu_MultilineLabel::draw(Display* d, Drawable drawable, GC gc, const Neu_Th
     drawHintPopup(d, drawable, gc, theme);
 }
 
+
+void Neu_RichTextCode::applyHeading(int level)
+{
+    Neu_TextFragment style;
+    style.headingLevel = std::max(0, std::min(7, level));
+    applyFragmentStyleToSelection(style);
+}
+
+void Neu_RichTextCode::applyFontColor(const Neu_Color& color)
+{
+    Neu_TextFragment style;
+    style.useFontColor = true;
+    style.fontColor = color;
+    applyFragmentStyleToSelection(style);
+}
+
+void Neu_RichTextCode::applyBackgroundColor(const Neu_Color& color)
+{
+    Neu_TextFragment style;
+    style.useBackgroundColor = true;
+    style.backgroundColor = color;
+    applyFragmentStyleToSelection(style);
+}
+
+void Neu_RichTextCode::applyHighlightColor(const Neu_Color& color)
+{
+    Neu_TextFragment style;
+    style.useHighlightColor = true;
+    style.highlightColor = color;
+    applyFragmentStyleToSelection(style);
+}
+
+void Neu_RichTextCode::applyFragmentStyleToSelection(const Neu_TextFragment& style)
+{
+    const size_t a = hasSelection() ? selectionStart() : 0;
+    const size_t b = hasSelection() ? selectionEnd() : text_.size();
+    if (text_.empty() || a >= b || b > text_.size()) {
+        return;
+    }
+    pushUndoSnapshot();
+    std::vector<Neu_TextFragment> fragments;
+    if (a > 0) {
+        Neu_TextFragment before;
+        before.text = text_.substr(0, a);
+        before.useFontColor = true;
+        before.fontColor = defaultFontColor_;
+        fragments.push_back(before);
+    }
+    Neu_TextFragment selected = style;
+    selected.text = text_.substr(a, b - a);
+    if (!selected.useFontColor) {
+        selected.useFontColor = true;
+        selected.fontColor = defaultFontColor_;
+    }
+    if (!selected.fontName.empty()) {
+        selected.monospace = selected.fontName.find("Mono") != std::string::npos || selected.fontName.find("mono") != std::string::npos;
+    }
+    fragments.push_back(selected);
+    if (b < text_.size()) {
+        Neu_TextFragment after;
+        after.text = text_.substr(b);
+        after.useFontColor = true;
+        after.fontColor = defaultFontColor_;
+        fragments.push_back(after);
+    }
+    richTextFragments_ = fragments;
+    requestRedraw();
+}
+
+void Neu_RichTextCode::applyToolbarAction(int actionIndex)
+{
+    Neu_TextFragment style;
+    switch (actionIndex) {
+    case 0: style.bold = true; break;
+    case 1: style.italic = true; break;
+    case 2: style.underline = true; break;
+    case 3: style.strikethrough = true; break;
+    case 4: style.doubleStrikethrough = true; break;
+    case 5: style.headingLevel = 1; break;
+    case 6: style.headingLevel = 2; break;
+    case 7: style.monospace = true; style.fontName = "Monospace"; break;
+    case 8:
+        toolbarFontIndex_ = (toolbarFontIndex_ + 1) % static_cast<int>(toolbarFonts_.size());
+        style.fontName = toolbarFonts_[toolbarFontIndex_];
+        style.monospace = style.fontName == "Monospace";
+        break;
+    case 9: style.useFontColor = true; style.fontColor = Neu_Color{144,202,249,255}; break;
+    case 10: style.useBackgroundColor = true; style.backgroundColor = Neu_Color{36,46,62,255}; break;
+    case 11: style.useHighlightColor = true; style.highlightColor = sketchHighlightColor_; break;
+    case 12: setTextAlignment(Neu_TextAlignment::Left); return;
+    case 13: setTextAlignment(Neu_TextAlignment::Center); return;
+    case 14: setTextAlignment(Neu_TextAlignment::Right); return;
+    case 15: setWordWrap(!wordWrap_); return;
+    default: return;
+    }
+    applyFragmentStyleToSelection(style);
+}
+
 void Neu_RichTextCode::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme)
 {
     Neu_Control::draw(d, drawable, gc, theme);
@@ -3790,6 +4012,19 @@ void Neu_RichTextCode::handleXEvent(XEvent& ev)
         }
         Neu_Rect r = bounds();
         const int toolbarH = toolbarVisible_ ? 34 : 0;
+        if (toolbarVisible_ && ev.y >= r.y + 7 && ev.y <= r.y + 29) {
+            int tx = r.x + 8;
+            for (int i = 0; i < 16; ++i) {
+                if (ev.x >= tx && ev.x <= tx + 42) {
+                    applyToolbarAction(i);
+                    return;
+                }
+                tx += 46;
+                if (tx > r.x + r.width - 50) {
+                    break;
+                }
+            }
+        }
         constexpr int lineHeight = 20;
         const int contentLeft = r.x + 56;
         const int contentTop = r.y + toolbarH + 4;

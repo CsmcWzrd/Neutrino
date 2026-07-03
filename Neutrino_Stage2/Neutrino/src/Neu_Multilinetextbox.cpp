@@ -157,17 +157,17 @@ void Neu_Multilinetextbox::draw(Display* display, Drawable drawable, GC gc, cons
 
 void Neu_Multilinetextbox::handleXEvent(XEvent& event)
 {
-    if (event.type == ButtonPress && contains(event.xbutton.x, event.xbutton.y)) {
+    auto cursorFromMouse = [&](int px, int py) -> size_t {
         const auto rect = bounds();
         constexpr int lineHeight = 18;
         const int contentLeft = rect.x + 8;
         const int contentTop = rect.y + 8;
-        const int lineIndex = std::max(0, (event.xbutton.y - contentTop + scrollY()) / lineHeight);
+        const int lineIndex = std::max(0, (py - contentTop + scrollY()) / lineHeight);
         const auto lines = splitVisualLines(text_);
         const int clampedLine = std::min(lineIndex, std::max(0, static_cast<int>(lines.size()) - 1));
         const size_t start = lineStartOffset(text_, clampedLine);
         const size_t end = lineEndOffset(text_, start);
-        const int localX = event.xbutton.x - contentLeft + (wordWrap_ ? 0 : scrollX());
+        const int localX = px - contentLeft + (wordWrap_ ? 0 : scrollX());
         size_t newCursor = start;
         for (size_t i = start + 1; i <= end; ++i) {
             const std::string prefix = text_.substr(start, i - start);
@@ -177,8 +177,79 @@ void Neu_Multilinetextbox::handleXEvent(XEvent& event)
                 break;
             }
         }
-        moveCursorWithSelection(newCursor, (event.xbutton.state & ShiftMask) != 0);
+        return newCursor;
+    };
+
+    if (event.type == ButtonPress && contains(event.xbutton.x, event.xbutton.y)) {
+        const size_t newCursor = cursorFromMouse(event.xbutton.x, event.xbutton.y);
+        if (!(event.xbutton.state & ShiftMask) && hasSelection() && newCursor >= selectionStart() && newCursor <= selectionEnd()) {
+            mouseDraggingSelectedText_ = true;
+            mouseSelecting_ = false;
+            dragSourceStart_ = selectionStart();
+            dragSourceEnd_ = selectionEnd();
+            dragText_ = selectedText();
+            dragDropCursor_ = newCursor;
+            cursor_ = newCursor;
+            Neu_Control::handleXEvent(event);
+            requestRedraw();
+            return;
+        }
+        mouseDraggingSelectedText_ = false;
+        mouseSelecting_ = true;
+        mouseSelectAnchor_ = (event.xbutton.state & ShiftMask) ? selectionStart() : newCursor;
+        if (event.xbutton.state & ShiftMask) {
+            moveCursorWithSelection(newCursor, true);
+        } else {
+            moveCursorWithSelection(newCursor, false);
+            mouseSelectAnchor_ = newCursor;
+        }
         Neu_Control::handleXEvent(event);
+        return;
+    }
+
+    if (event.type == MotionNotify && focused_) {
+        const size_t newCursor = cursorFromMouse(event.xmotion.x, event.xmotion.y);
+        if (mouseDraggingSelectedText_) {
+            dragDropCursor_ = newCursor;
+            cursor_ = newCursor;
+            requestRedraw();
+            return;
+        }
+        if (mouseSelecting_) {
+            selectionStart_ = mouseSelectAnchor_;
+            selectionEnd_ = newCursor;
+            cursor_ = newCursor;
+            requestRedraw();
+            return;
+        }
+    }
+
+    if (event.type == ButtonRelease && mouseDraggingSelectedText_) {
+        mouseDraggingSelectedText_ = false;
+        if (!dragText_.empty() && dragSourceStart_ < dragSourceEnd_ && dragSourceEnd_ <= text_.size()) {
+            size_t drop = std::min(dragDropCursor_, text_.size());
+            if (drop < dragSourceStart_ || drop > dragSourceEnd_) {
+                pushUndoSnapshot();
+                text_.erase(dragSourceStart_, dragSourceEnd_ - dragSourceStart_);
+                if (drop > dragSourceEnd_) {
+                    drop -= (dragSourceEnd_ - dragSourceStart_);
+                }
+                drop = std::min(drop, text_.size());
+                text_.insert(drop, dragText_);
+                cursor_ = drop + dragText_.size();
+                selectionStart_ = drop;
+                selectionEnd_ = cursor_;
+                invokeTextChanged();
+            }
+        }
+        dragText_.clear();
+        requestRedraw();
+        return;
+    }
+
+    if (event.type == ButtonRelease && mouseSelecting_) {
+        mouseSelecting_ = false;
+        requestRedraw();
         return;
     }
 

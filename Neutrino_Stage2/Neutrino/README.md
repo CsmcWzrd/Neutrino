@@ -476,3 +476,36 @@ bool open = menu->isVisible();
 
 The control is still visible by default for compatibility. Call `hide()` after construction when popup behavior is desired. The popup-menu test application includes Show, Hide, and Toggle buttons.
 
+
+## Stage2 rich text toolbar editing, selection keys, and Wayland build preference
+
+`Neu_RichTextCode` now has a functional Unicode toolbar. Toolbar clicks apply formatting or alignment to the current selection, or to the entire control text when no selection exists. Supported actions include bold, italic, underline, strikethrough, double strikethrough, Heading 1/2, monospace, font-family cycling, font color, background color, sketch/highlight color, left/center/right alignment, and word-wrap toggle.
+
+Editable text controls now support Shift+Home, Shift+End, Shift+PageUp, Shift+PageDown, Home, End, PageUp, PageDown, Insert overwrite mode, and mouse drag selection. Clipboard and undo/redo shortcuts remain Ctrl+A/C/X/V, Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y, and Alt+Backspace.
+
+For Linux builds, Wayland support is preferred when available unless `NEUTRINO_USE_X11=1` is set. You can explicitly request the Wayland-preferred path with:
+
+```sh
+NEUTRINO_USE_X11=0 make
+NEUTRINO_USE_X11=0 cmake -S . -B build-wayland
+```
+
+See `STAGE2_RICHTEXT_TOOLBAR_EDITING_FIXES.md` for the detailed fix note.
+
+## Stage2 rich text toolbar / selection / Wayland preference update
+
+The rich text/code toolbar is now functional: toolbar buttons apply bold, italic, underline, strikethrough, double strikethrough, heading, monospace, font family, font color, background, highlight, alignment, and word-wrap changes to selected text. Toolbar labels use Unicode symbols.
+
+Editable text controls support selection highlights, Ctrl+A/C/X/V, Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y, Alt+Backspace, Shift+Home/End/PageUp/PageDown, Insert overwrite mode, mouse drag selection, and same-control selected-text drag/drop movement.
+
+Linux builds now prefer Wayland-capable configuration when `wayland-client` is available. Use `NEUTRINO_USE_X11=0` or leave it unset to prefer Wayland; set `NEUTRINO_USE_X11=1` to force X11.
+
+
+## Stage2 rich text focused tests
+
+Added full-window test applications for rich text editing and rich text code editing:
+
+- `neutrino_test_20_full_richtext_control`
+- `neutrino_test_21_full_richtext_code_control`
+
+`Alt+Backspace` now performs Undo; redo remains available through `Ctrl+Y` and `Ctrl+Shift+Z`.

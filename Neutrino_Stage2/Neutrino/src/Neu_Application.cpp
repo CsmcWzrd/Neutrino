@@ -84,10 +84,11 @@ bool Neu_Application::open()
     waylandAvailable_ = detectWayland();
     const char* forceX11 = std::getenv("NEUTRINO_USE_X11");
     const bool useX11 = forceX11 && std::strcmp(forceX11, "1") == 0;
-    if (!useX11 && waylandAvailable_) {
+    const bool preferWayland = !forceX11 || std::strcmp(forceX11, "0") == 0;
+    if (!useX11 && preferWayland && waylandAvailable_) {
         // Stage2 uses the existing renderer through an XWayland bridge when present.
-        // The application still chooses the Wayland session path by default and only
-        // forces plain X11 when NEUTRINO_USE_X11=1 is set.
+        // The application chooses the Wayland session path by default and also when
+        // NEUTRINO_USE_X11=0 is set; only NEUTRINO_USE_X11=1 forces plain X11.
         backend_ = Neu_Backend::Wayland;
         backendName_ = "Wayland/XWayland";
     } else {

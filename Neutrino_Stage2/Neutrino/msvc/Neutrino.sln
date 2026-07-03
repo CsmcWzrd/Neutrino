@@ -58,6 +58,10 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "NeutrinoTest18Stage2ScrollC
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "NeutrinoTest19MaterialBeauty", "NeutrinoTest19MaterialBeauty.vcxproj", "{87E23700-C37F-5A0D-9961-BA6F1F18E351}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "NeutrinoTest20FullRichTextControl", "NeutrinoTest20FullRichTextControl.vcxproj", "{D6CDDB52-FF46-56E3-8BE0-70FE5BA229F1}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "NeutrinoTest21FullRichTextCodeControl", "NeutrinoTest21FullRichTextCodeControl.vcxproj", "{0D1FEA3D-23B1-5D8D-B0E0-638D4C853505}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -176,6 +180,14 @@ Global
 		{87E23700-C37F-5A0D-9961-BA6F1F18E351}.Debug|x64.Build.0 = Debug|x64
 		{87E23700-C37F-5A0D-9961-BA6F1F18E351}.Release|x64.ActiveCfg = Release|x64
 		{87E23700-C37F-5A0D-9961-BA6F1F18E351}.Release|x64.Build.0 = Release|x64
+		{D6CDDB52-FF46-56E3-8BE0-70FE5BA229F1}.Debug|x64.ActiveCfg = Debug|x64
+		{D6CDDB52-FF46-56E3-8BE0-70FE5BA229F1}.Debug|x64.Build.0 = Debug|x64
+		{D6CDDB52-FF46-56E3-8BE0-70FE5BA229F1}.Release|x64.ActiveCfg = Release|x64
+		{D6CDDB52-FF46-56E3-8BE0-70FE5BA229F1}.Release|x64.Build.0 = Release|x64
+		{0D1FEA3D-23B1-5D8D-B0E0-638D4C853505}.Debug|x64.ActiveCfg = Debug|x64
+		{0D1FEA3D-23B1-5D8D-B0E0-638D4C853505}.Debug|x64.Build.0 = Debug|x64
+		{0D1FEA3D-23B1-5D8D-B0E0-638D4C853505}.Release|x64.ActiveCfg = Release|x64
+		{0D1FEA3D-23B1-5D8D-B0E0-638D4C853505}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
