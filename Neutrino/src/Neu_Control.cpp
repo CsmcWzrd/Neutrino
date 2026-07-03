@@ -488,13 +488,21 @@ void Neu_Control::drawHintPopup(Display* display, Drawable drawable, GC gc, cons
 void Neu_Control::draw(Display* display, Drawable drawable, GC gc, const Neu_Theme& theme)
 {
     const auto rect = bounds();
-    const Neu_Color fill = hover_ ? theme.hover : theme.glass;
+    const std::string cls = className();
+    const bool suppressHoverFill = cls == "Neu_RichTextCode"
+                                   || cls == "Neu_ReadOnlyRichText"
+                                   || cls == "Neu_Placement"
+                                   || cls == "Neu_ScrollWindow"
+                                   || cls == "Neu_ListView"
+                                   || cls == "Neu_TreeView"
+                                   || cls == "Neu_Multilinetextbox";
+    const Neu_Color fill = (hover_ && !suppressHoverFill) ? theme.highlight : theme.glass;
     XSetForeground(display, gc, Neu_Pixel(display, fill));
     Neu_DrawRoundedRect(display, drawable, gc, rect.x, rect.y, rect.width, rect.height, theme.radius, true);
-    XSetForeground(display, gc, Neu_Pixel(display, focused_ ? theme.accent : theme.border));
+    XSetForeground(display, gc, Neu_Pixel(display, focused_ ? theme.focus : theme.border));
     Neu_DrawRoundedRect(display, drawable, gc, rect.x, rect.y, rect.width, rect.height, theme.radius, false);
-    if (focused_) {
-        XSetForeground(display, gc, Neu_Pixel(display, theme.accent));
+    if (focused_ && !suppressHoverFill) {
+        XSetForeground(display, gc, Neu_Pixel(display, theme.focus));
         Neu_DrawRoundedRect(display, drawable, gc, rect.x + 2, rect.y + 2, rect.width - 4, rect.height - 4, std::max(2, theme.radius - 2), false);
     }
 }
@@ -667,7 +675,7 @@ void Neu_Control::drawScrollbars(Display* display, Drawable drawable, GC gc, con
         const int thumbY = trackY + (trackH - thumbH) * scrollY_ / maxY;
         XSetForeground(display, gc, Neu_Pixel(display, Neu_Color{205, 215, 226, 210}));
         XFillRectangle(display, drawable, gc, trackX, trackY, 5, trackH);
-        XSetForeground(display, gc, Neu_Pixel(display, theme.accent));
+        XSetForeground(display, gc, Neu_Pixel(display, theme.focus));
         XFillRectangle(display, drawable, gc, trackX - 1, thumbY, 7, thumbH);
     }
 
@@ -680,7 +688,7 @@ void Neu_Control::drawScrollbars(Display* display, Drawable drawable, GC gc, con
         const int thumbX = trackX + (trackW - thumbW) * scrollX_ / maxX;
         XSetForeground(display, gc, Neu_Pixel(display, Neu_Color{205, 215, 226, 210}));
         XFillRectangle(display, drawable, gc, trackX, trackY, trackW, 5);
-        XSetForeground(display, gc, Neu_Pixel(display, theme.accent));
+        XSetForeground(display, gc, Neu_Pixel(display, theme.focus));
         XFillRectangle(display, drawable, gc, thumbX, trackY - 1, thumbW, 7);
     }
 }

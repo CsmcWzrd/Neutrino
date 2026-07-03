@@ -27,6 +27,13 @@ Run Linux examples from the project root so relative BMP paths such as `assets/i
 | `neutrino_test_10_images_progress_labels` / `NeutrinoTest10ImagesProgressLabels` | `examples/neutrino_test_10_images_progress_labels.cpp` | `Neu_ImageView`, `Neu_ProgressSquare`, `Neu_Label`, `Neu_MultilineLabel`, BMP icons, progress updates. |
 | `neutrino_test_11_rendering_buffering` / `NeutrinoTest11RenderingBuffering` | `examples/neutrino_test_11_rendering_buffering.cpp` | Shadows, hover hints, long hint popup behavior, smooth graphics options, multi-stage double buffering toggle. |
 | `neutrino_test_12_scroll_windows_heavy_data` / `NeutrinoTest12ScrollWindowsHeavyData` | `examples/neutrino_test_12_scroll_windows_heavy_data.cpp` | `Neu_ScrollWindow`, standalone `Neu_ScrollBar`, heavy `Neu_ListView`, heavy `Neu_Listbox`, vertical/horizontal scroll metadata. |
+| `neutrino_test_13_swing_swt_controls` / `NeutrinoTest13SwingSwtControls` | `examples/neutrino_test_13_swing_swt_controls.cpp` | Stage2 overview: Swing/SWT-inspired controls, theme selector, label offsets, tab/splitter/toolbar/group controls. |
+| `neutrino_test_14_label_offsets_themes` / `NeutrinoTest14LabelOffsetsThemes` | `examples/neutrino_test_14_label_offsets_themes.cpp` | Stage2 label text offsets/insets, optional borders, single-line truncation, multiline wrapping, rich fragments, and 24+ built-in themes. |
+| `neutrino_test_15_selection_controls` / `NeutrinoTest15SelectionControls` | `examples/neutrino_test_15_selection_controls.cpp` | `Neu_CheckBox`, `Neu_RadioButton`, `Neu_ToggleButton`, `Neu_GroupBox`, `Neu_Separator`, `Neu_LinkLabel`, and callback-driven radio behavior. |
+| `neutrino_test_16_value_controls` / `NeutrinoTest16ValueControls` | `examples/neutrino_test_16_value_controls.cpp` | `Neu_ProgressBar`, `Neu_ProgressSquare`, horizontal/vertical `Neu_Slider`, `Neu_Spinner`, and value-control callbacks. |
+| `neutrino_test_17_tabs_toolbar_splitter` / `NeutrinoTest17TabsToolbarSplitter` | `examples/neutrino_test_17_tabs_toolbar_splitter.cpp` | `Neu_ToolBar`, `Neu_TabView`, `Neu_Splitter`, fixed-position tab pages, icons, and nested controls. |
+| `neutrino_test_18_stage2_scroll_controls` / `NeutrinoTest18Stage2ScrollControls` | `examples/neutrino_test_18_stage2_scroll_controls.cpp` | `Neu_ScrollWindow` containing Stage2 controls, clipping, scrolling and nested child drawing on Linux/Windows. |
+| `neutrino_test_19_material_beauty` / `NeutrinoTest19MaterialBeauty` | `examples/neutrino_test_19_material_beauty.cpp` | Stage2 beauty rendering: MaterialDark default, gradient surfaces, highlight/focus colors, edge/rounded corner switching, and DAA/MSAA/SSAA theme antialiasing. |
 
 ## Windows-only demo
 
@@ -57,3 +64,4 @@ cmake --build build-vs2022 --config Release
 ## Visual Studio project settings
 
 Every `msvc/*.vcxproj` file uses Visual Studio 2022 toolset `v143`, C++17 mode via `<LanguageStandard>stdcpp17</LanguageStandard>`, Unicode character set, `/utf-8`, and `_CRT_SECURE_NO_WARNINGS` in both Debug and Release configurations.
+

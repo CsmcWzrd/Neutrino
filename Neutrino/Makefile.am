@@ -1,32 +1,9 @@
 AUTOMAKE_OPTIONS = foreign subdir-objects
 AM_CPPFLAGS = -I$(top_srcdir)/include
 lib_LIBRARIES = libNeutrino.a
-libNeutrino_a_SOURCES = src/Neu_Application.cpp \
-    src/Neu_Button.cpp \
-    src/Neu_ComboBox.cpp \
-    src/Neu_Control.cpp \
-    src/Neu_Graphics.cpp \
-    src/Neu_IconBmp.cpp \
-    src/Neu_ScrollWindow.cpp \
-    src/Neu_ScrollBar.cpp \
-    src/Neu_RichTextCode.cpp \
-    src/Neu_ReadOnlyRichText.cpp \
-    src/Neu_ProgressSquare.cpp \
-    src/Neu_Label.cpp \
-    src/Neu_ImageView.cpp \
-    src/Neu_ListView.cpp \
-    src/Neu_Listbox.cpp \
-    src/Neu_Multilinetextbox.cpp \
-    src/Neu_Passwordbox.cpp \
-    src/Neu_Placement.cpp \
-    src/Neu_PopWindowMenu.cpp \
-    src/Neu_Textbox.cpp \
-    src/Neu_Theme.cpp \
-    src/Neu_TreeView.cpp \
-    src/Neu_TypeInterpreter.cpp \
-    src/Neu_Window.cpp
+libNeutrino_a_SOURCES = src/Neu_Application.cpp src/Neu_AdditionalControls.cpp src/Neu_Button.cpp src/Neu_ComboBox.cpp src/Neu_Control.cpp src/Neu_Graphics.cpp src/Neu_IconBmp.cpp src/Neu_ScrollWindow.cpp src/Neu_ScrollBar.cpp src/Neu_RichTextCode.cpp src/Neu_ReadOnlyRichText.cpp src/Neu_ProgressSquare.cpp src/Neu_Label.cpp src/Neu_ImageView.cpp src/Neu_ListView.cpp src/Neu_Listbox.cpp src/Neu_Multilinetextbox.cpp src/Neu_Passwordbox.cpp src/Neu_Placement.cpp src/Neu_PopWindowMenu.cpp src/Neu_Textbox.cpp src/Neu_Theme.cpp src/Neu_TreeView.cpp src/Neu_TypeInterpreter.cpp src/Neu_Window.cpp
 include_HEADERS = include/Neutrino/Neutrino.hpp
-bin_PROGRAMS = neutrino_demo neutrino_test_all_controls neutrino_test_windows neutrino_test_typed_views neutrino_test_smooth_graphics neutrino_test_treeview_collapse neutrino_test_heavy_data neutrino_test_01_buttons_icons neutrino_test_02_text_inputs neutrino_test_03_lists_combo_autoscroll neutrino_test_04_listview_typed_data neutrino_test_05_treeview_collapse neutrino_test_06_placement_layout_scaling neutrino_test_07_popup_menu_categories neutrino_test_08_richtext_code neutrino_test_09_readonly_richtext_icons neutrino_test_10_images_progress_labels neutrino_test_11_rendering_buffering neutrino_test_12_scroll_windows_heavy_data
+bin_PROGRAMS = neutrino_demo neutrino_test_all_controls neutrino_test_windows neutrino_test_typed_views neutrino_test_smooth_graphics neutrino_test_treeview_collapse neutrino_test_heavy_data neutrino_test_01_buttons_icons neutrino_test_02_text_inputs neutrino_test_03_lists_combo_autoscroll neutrino_test_04_listview_typed_data neutrino_test_05_treeview_collapse neutrino_test_06_placement_layout_scaling neutrino_test_07_popup_menu_categories neutrino_test_08_richtext_code neutrino_test_09_readonly_richtext_icons neutrino_test_10_images_progress_labels neutrino_test_11_rendering_buffering neutrino_test_12_scroll_windows_heavy_data neutrino_test_13_swing_swt_controls neutrino_test_14_label_offsets_themes neutrino_test_15_selection_controls neutrino_test_16_value_controls neutrino_test_17_tabs_toolbar_splitter neutrino_test_18_stage2_scroll_controls neutrino_test_19_material_beauty
 neutrino_demo_SOURCES = examples/demo.cpp
 neutrino_demo_LDADD = libNeutrino.a -lX11 -ldl
 neutrino_test_all_controls_SOURCES = examples/test_all_controls.cpp
@@ -65,3 +42,18 @@ neutrino_test_11_rendering_buffering_SOURCES = examples/neutrino_test_11_renderi
 neutrino_test_11_rendering_buffering_LDADD = libNeutrino.a -lX11 -ldl
 neutrino_test_12_scroll_windows_heavy_data_SOURCES = examples/neutrino_test_12_scroll_windows_heavy_data.cpp
 neutrino_test_12_scroll_windows_heavy_data_LDADD = libNeutrino.a -lX11 -ldl
+neutrino_test_13_swing_swt_controls_SOURCES = examples/neutrino_test_13_swing_swt_controls.cpp
+neutrino_test_13_swing_swt_controls_LDADD = libNeutrino.a -lX11 -ldl
+neutrino_test_14_label_offsets_themes_SOURCES = examples/neutrino_test_14_label_offsets_themes.cpp
+neutrino_test_14_label_offsets_themes_LDADD = libNeutrino.a -lX11 -ldl
+neutrino_test_15_selection_controls_SOURCES = examples/neutrino_test_15_selection_controls.cpp
+neutrino_test_15_selection_controls_LDADD = libNeutrino.a -lX11 -ldl
+neutrino_test_16_value_controls_SOURCES = examples/neutrino_test_16_value_controls.cpp
+neutrino_test_16_value_controls_LDADD = libNeutrino.a -lX11 -ldl
+neutrino_test_17_tabs_toolbar_splitter_SOURCES = examples/neutrino_test_17_tabs_toolbar_splitter.cpp
+neutrino_test_17_tabs_toolbar_splitter_LDADD = libNeutrino.a -lX11 -ldl
+neutrino_test_18_stage2_scroll_controls_SOURCES = examples/neutrino_test_18_stage2_scroll_controls.cpp
+neutrino_test_18_stage2_scroll_controls_LDADD = libNeutrino.a -lX11 -ldl
+
+neutrino_test_19_material_beauty_SOURCES = examples/neutrino_test_19_material_beauty.cpp
+neutrino_test_19_material_beauty_LDADD = libNeutrino.a -lX11 -ldl

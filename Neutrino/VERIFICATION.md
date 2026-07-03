@@ -124,3 +124,45 @@ make -f Makefile.autoconf -j2
 ```
 
 The Win32 backend and VS2022 project files were updated, but MSVC/Windows SDK compilation was not available inside this Linux container.
+
+## 2026-07-02 Win32 MSVC compile fix
+
+Patched `src/win32/Neu_Win32.cpp` around the ListView and TreeView clipping paths to avoid MSVC template deduction failures with `std::min` / `std::max` when mixing Win32 `RECT` members (`LONG`) with `int` viewport values. The affected values are now cast explicitly to `int` before calling `std::min` / `std::max` and before calculating draw widths.
+
+This directly addresses the VS2022 errors reported around lines 1523-1526, 1536-1537, and 1768-1770.
+
+## 2026-07-02 Win32 MSVC clipping compile fix
+
+Patched `src/win32/Neu_Win32.cpp` to remove the MSVC C2672/C2660 errors reported around ListView/TreeView clipping. The fix avoids mixed `LONG`/`int` `std::min` and `std::max` deduction by converting Win32 `RECT` coordinates to `int` before clipping/truncation math.
+
+Affected areas:
+
+- `Neu_ListView::draw(...)` visible-cell clipping and `IntersectClipRect(...)` calls.
+- `Neu_TreeView::draw(...)` text clipping and `IntersectClipRect(...)` calls.
+
+Linux build paths rechecked after the patch:
+
+```sh
+make -j2
+cmake -S . -B cmake-build
+cmake --build cmake-build -j2
+./configure
+make -f Makefile.autoconf -j2
+```
+
+MSVC cannot be executed in this Linux container, but the reported Win32 compile errors were directly patched in the reported file and line area.
+
+## Stage2 verification
+
+Stage2 should be verified with the new focused tests:
+
+```sh
+make clean
+make -j2 build/libNeutrino.a     build/neutrino_test_13_swing_swt_controls     build/neutrino_test_14_label_offsets_themes     build/neutrino_test_15_selection_controls     build/neutrino_test_16_value_controls     build/neutrino_test_17_tabs_toolbar_splitter     build/neutrino_test_18_stage2_scroll_controls
+cmake -S . -B cmake-build-stage2
+cmake --build cmake-build-stage2 --target Neutrino     neutrino_test_13_swing_swt_controls     neutrino_test_14_label_offsets_themes     neutrino_test_15_selection_controls     neutrino_test_16_value_controls     neutrino_test_17_tabs_toolbar_splitter     neutrino_test_18_stage2_scroll_controls -j2
+make -f Makefile.autoconf clean
+make -f Makefile.autoconf -j2 build-autoconf/libNeutrino.a     build-autoconf/neutrino_test_13_swing_swt_controls     build-autoconf/neutrino_test_14_label_offsets_themes     build-autoconf/neutrino_test_15_selection_controls     build-autoconf/neutrino_test_16_value_controls     build-autoconf/neutrino_test_17_tabs_toolbar_splitter     build-autoconf/neutrino_test_18_stage2_scroll_controls
+```
+
+The Visual Studio 2022 solution contains matching Stage2 projects and remains configured for standard C++17 and `_CRT_SECURE_NO_WARNINGS`.

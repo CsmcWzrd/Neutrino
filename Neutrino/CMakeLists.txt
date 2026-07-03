@@ -3,6 +3,7 @@ project(Neutrino VERSION 0.3.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+set(Neutrino_EXAMPLE_TARGETS)
 function(neutrino_add_example target source_file)
     add_executable(${target} ${source_file})
     target_link_libraries(${target} PRIVATE Neutrino)
@@ -20,7 +21,7 @@ if(WIN32)
 
     add_executable(neutrino_win32_demo WIN32 examples/windows/neutrino_win32_demo.cpp)
     target_link_libraries(neutrino_win32_demo PRIVATE Neutrino)
-    set(Neutrino_EXAMPLE_TARGETS neutrino_win32_demo)
+    list(APPEND Neutrino_EXAMPLE_TARGETS neutrino_win32_demo)
 else()
     find_package(X11 REQUIRED)
     find_package(PkgConfig QUIET)
@@ -29,6 +30,7 @@ else()
     endif()
     add_library(Neutrino STATIC
         src/Neu_Application.cpp
+        src/Neu_AdditionalControls.cpp
         src/Neu_Button.cpp
         src/Neu_ComboBox.cpp
         src/Neu_Control.cpp
@@ -60,7 +62,6 @@ else()
         target_link_libraries(Neutrino PUBLIC ${XFT_LIBRARIES})
     endif()
     target_link_libraries(Neutrino PUBLIC ${X11_LIBRARIES} ${CMAKE_DL_LIBS})
-    set(Neutrino_EXAMPLE_TARGETS)
 endif()
 
 neutrino_add_example(neutrino_demo examples/demo.cpp)
@@ -82,6 +83,13 @@ neutrino_add_example(neutrino_test_09_readonly_richtext_icons examples/neutrino_
 neutrino_add_example(neutrino_test_10_images_progress_labels examples/neutrino_test_10_images_progress_labels.cpp)
 neutrino_add_example(neutrino_test_11_rendering_buffering examples/neutrino_test_11_rendering_buffering.cpp)
 neutrino_add_example(neutrino_test_12_scroll_windows_heavy_data examples/neutrino_test_12_scroll_windows_heavy_data.cpp)
+neutrino_add_example(neutrino_test_13_swing_swt_controls examples/neutrino_test_13_swing_swt_controls.cpp)
+neutrino_add_example(neutrino_test_14_label_offsets_themes examples/neutrino_test_14_label_offsets_themes.cpp)
+neutrino_add_example(neutrino_test_15_selection_controls examples/neutrino_test_15_selection_controls.cpp)
+neutrino_add_example(neutrino_test_16_value_controls examples/neutrino_test_16_value_controls.cpp)
+neutrino_add_example(neutrino_test_17_tabs_toolbar_splitter examples/neutrino_test_17_tabs_toolbar_splitter.cpp)
+neutrino_add_example(neutrino_test_18_stage2_scroll_controls examples/neutrino_test_18_stage2_scroll_controls.cpp)
+neutrino_add_example(neutrino_test_19_material_beauty examples/neutrino_test_19_material_beauty.cpp)
 
 install(TARGETS Neutrino ${Neutrino_EXAMPLE_TARGETS} ARCHIVE DESTINATION lib RUNTIME DESTINATION bin)
 install(DIRECTORY include/Neutrino DESTINATION include)

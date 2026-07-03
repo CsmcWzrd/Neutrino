@@ -5,7 +5,7 @@ namespace neutrino {
 void Neu_Button::draw(Display* display, Drawable drawable, GC gc, const Neu_Theme& theme)
 {
     const auto rect = bounds();
-    const Neu_Color fill = pressed_ ? theme.pressed : (hover_ ? theme.hover : theme.glass);
+    const Neu_Color fill = pressed_ ? theme.pressed : (hover_ ? theme.highlight : theme.glass);
 
     XSetForeground(display, gc, Neu_Pixel(display, fill));
     Neu_DrawRoundedRect(display, drawable, gc, rect.x, rect.y, rect.width, rect.height, theme.radius, true);

@@ -10,6 +10,7 @@ LDFLAGS = @LDFLAGS@
 X11_LIBS = @X11_LIBS@
 DL_LIBS = @DL_LIBS@
 SRC = src/Neu_Application.cpp \
+    src/Neu_AdditionalControls.cpp \
     src/Neu_Button.cpp \
     src/Neu_ComboBox.cpp \
     src/Neu_Control.cpp \
@@ -53,7 +54,14 @@ EXAMPLES = build-autoconf/neutrino_demo \
     build-autoconf/neutrino_test_09_readonly_richtext_icons \
     build-autoconf/neutrino_test_10_images_progress_labels \
     build-autoconf/neutrino_test_11_rendering_buffering \
-    build-autoconf/neutrino_test_12_scroll_windows_heavy_data
+    build-autoconf/neutrino_test_12_scroll_windows_heavy_data \
+    build-autoconf/neutrino_test_13_swing_swt_controls \
+    build-autoconf/neutrino_test_14_label_offsets_themes \
+    build-autoconf/neutrino_test_15_selection_controls \
+    build-autoconf/neutrino_test_16_value_controls \
+    build-autoconf/neutrino_test_17_tabs_toolbar_splitter \
+    build-autoconf/neutrino_test_18_stage2_scroll_controls \
+    build-autoconf/neutrino_test_19_material_beauty
 
 all: $(LIB) $(EXAMPLES)
 

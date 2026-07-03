@@ -39,7 +39,7 @@ inline bool start_app(neutrino::Neu_Application& app, int argc, char** argv)
 
 inline void apply_test_window_defaults(neutrino::Neu_Window& window)
 {
-    window.setTheme(neutrino::Neu_Theme::BlueGlass());
+    window.setTheme(neutrino::Neu_Theme::MaterialDark());
     window.setMultiStageDoubleBuffering(true);
 }
 

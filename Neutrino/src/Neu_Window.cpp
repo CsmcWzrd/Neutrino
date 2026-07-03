@@ -14,15 +14,10 @@ Neu_Control* hitOne(const std::shared_ptr<Neu_Control>& control, int x, int y)
     }
 
     if (auto scroll = dynamic_cast<Neu_ScrollWindow*>(control.get())) {
-        const int childX = x + scroll->scrollX();
-        const int childY = y + scroll->scrollY();
-        const auto& children = scroll->children();
-        for (auto it = children.rbegin(); it != children.rend(); ++it) {
-            Neu_Control* hit = hitOne(*it, childX, childY);
-            if (hit) {
-                return hit;
-            }
-        }
+        // A scroll window must receive pointer events first so it can translate
+        // window coordinates into content-relative coordinates before forwarding
+        // to children. Returning child controls here made moved/scrolling
+        // viewports desynchronize event routing from the painted content.
         return scroll;
     }
 
@@ -69,8 +64,10 @@ Neu_Window::Neu_Window(Neu_Application& app, int width, int height, const std::s
       display_(app.display()),
       width_(width),
       height_(height),
-      title_(title)
+      title_(title),
+      theme_(Neu_Theme::MaterialDark())
 {
+    Neu_ApplyThemeRenderingOptions(theme_);
 }
 
 Neu_Window::~Neu_Window()
@@ -192,8 +189,16 @@ void Neu_Window::ensureBuffers()
     bufferHeight_ = height_;
 }
 
+void Neu_Window::setTheme(const Neu_Theme& theme)
+{
+    theme_ = theme;
+    Neu_ApplyThemeRenderingOptions(theme_);
+    requestRedraw();
+}
+
 void Neu_Window::drawScene(Drawable target)
 {
+    Neu_SetCurrentDrawingTheme(theme_);
     XSetForeground(display_, gc_, Neu_Pixel(display_, theme_.background));
     XSetBackground(display_, gc_, Neu_Pixel(display_, theme_.background));
     XFillRectangle(display_, target, gc_, 0, 0, width_, height_);
@@ -219,6 +224,7 @@ void Neu_Window::drawScene(Drawable target)
 
 void Neu_Window::paint(Drawable target)
 {
+    Neu_SetCurrentDrawingTheme(theme_);
     if (!window_) {
         return;
     }

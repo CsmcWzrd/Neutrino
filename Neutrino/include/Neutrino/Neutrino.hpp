@@ -57,6 +57,24 @@ struct Neu_Color { uint8_t r{0}, g{0}, b{0}, a{255}; };
 
 enum class Neu_TextAlignment { Left, Center, Right };
 
+enum class Neu_CornerStyle {
+    RoundedCorner,
+    EdgeCorner
+};
+
+enum class Neu_AntiAliasMode {
+    DAA,   // default device/font/XRender antialiasing
+    MSAA,  // multi-sample shape antialiasing
+    SSAA   // super-sample shape antialiasing
+};
+
+struct Neu_TextOffset {
+    int top{2};
+    int right{4};
+    int bottom{2};
+    int left{6};
+};
+
 struct Neu_TextFragment {
     std::string text;
     bool bold{false};
@@ -95,24 +113,69 @@ struct Neu_SmoothGraphicsOptions {
 };
 
 struct Neu_Theme {
-    Neu_Color background{245,248,252,255};
-    Neu_Color glass{238,246,255,210};
-    Neu_Color border{150,175,205,255};
-    Neu_Color text{20,28,38,255};
-    Neu_Color accent{70,135,220,255};
-    Neu_Color hover{225,238,255,255};
-    Neu_Color pressed{190,215,250,255};
-    Neu_Color shadow{36, 52, 70, 85};
-    Neu_Color hintBackground{255, 255, 232, 245};
-    Neu_Color hintBorder{118, 132, 72, 255};
-    int radius{12};
+    // Material-dark is the default theme used by new windows.
+    Neu_Color background{18,18,18,255};
+    Neu_Color glass{30,30,34,235};
+    Neu_Color border{62,66,74,255};
+    Neu_Color text{238,238,238,255};
+    Neu_Color accent{144,202,249,255};
+    Neu_Color hover{42,44,50,255};
+    Neu_Color pressed{56,60,68,255};
+    Neu_Color highlight{64,76,92,255};
+    Neu_Color focus{42,112,178,255};
+    Neu_Color controlGradientTop{58,62,70,255};
+    Neu_Color controlGradientBottom{22,24,30,255};
+    Neu_Color shadow{0, 0, 0, 135};
+    Neu_Color hintBackground{34, 34, 38, 250};
+    Neu_Color hintBorder{144, 202, 249, 255};
+    int radius{10};
+    int edgeSize{8};
+    bool gradientControls{true};
+    Neu_CornerStyle topLeftCorner{Neu_CornerStyle::EdgeCorner};
+    Neu_CornerStyle topRightCorner{Neu_CornerStyle::RoundedCorner};
+    Neu_CornerStyle bottomLeftCorner{Neu_CornerStyle::RoundedCorner};
+    Neu_CornerStyle bottomRightCorner{Neu_CornerStyle::EdgeCorner};
+    Neu_AntiAliasMode antiAliasMode{Neu_AntiAliasMode::DAA};
+    int antiAliasSamples{3};
     int shadowSize{7};
     int shadowOffsetX{3};
     int shadowOffsetY{4};
     std::string fontName{"DejaVu Sans:size=10:antialias=true:hinting=true:hintstyle=hintfull:rgba=rgb:lcdfilter=lcddefault"};
+    void setAllCorners(Neu_CornerStyle style) { topLeftCorner = style; topRightCorner = style; bottomLeftCorner = style; bottomRightCorner = style; }
+    void setCornerStyles(Neu_CornerStyle topLeft, Neu_CornerStyle topRight, Neu_CornerStyle bottomLeft, Neu_CornerStyle bottomRight) { topLeftCorner = topLeft; topRightCorner = topRight; bottomLeftCorner = bottomLeft; bottomRightCorner = bottomRight; }
+    void setRoundedCorners() { setAllCorners(Neu_CornerStyle::RoundedCorner); }
+    void setDefaultEdgeCorners() { setCornerStyles(Neu_CornerStyle::EdgeCorner, Neu_CornerStyle::RoundedCorner, Neu_CornerStyle::RoundedCorner, Neu_CornerStyle::EdgeCorner); }
     static Neu_Theme Light();
     static Neu_Theme Dark();
     static Neu_Theme BlueGlass();
+    static Neu_Theme Win95();
+    static Neu_Theme WinXP();
+    static Neu_Theme Win10();
+    static Neu_Theme Win11();
+    static Neu_Theme ClassicMotif();
+    static Neu_Theme SolarizedLight();
+    static Neu_Theme SolarizedDark();
+    static Neu_Theme Nord();
+    static Neu_Theme Dracula();
+    static Neu_Theme GruvboxLight();
+    static Neu_Theme GruvboxDark();
+    static Neu_Theme HighContrastLight();
+    static Neu_Theme HighContrastDark();
+    static Neu_Theme UbuntuAubergine();
+    static Neu_Theme KDEBreeze();
+    static Neu_Theme MacAqua();
+    static Neu_Theme MaterialLight();
+    static Neu_Theme MaterialDark();
+    static Neu_Theme Ocean();
+    static Neu_Theme Forest();
+    static Neu_Theme Rose();
+    static Neu_Theme Amber();
+    static Neu_Theme Slate();
+    static Neu_Theme Candy();
+    static Neu_Theme TerminalGreen();
+    static Neu_Theme CorporateBlue();
+    static std::vector<std::string> BuiltInThemeNames();
+    static Neu_Theme BuiltInThemeByName(const std::string& name);
 };
 
 class Neu_Control;
@@ -220,6 +283,9 @@ public:
     bool borderVisible() const { return borderVisible_; }
     void setTextAlignment(Neu_TextAlignment alignment) { textAlignment_ = alignment; requestRedraw(); }
     Neu_TextAlignment textAlignment() const { return textAlignment_; }
+    void setTextOffset(int top, int right, int bottom, int left) { textOffset_ = {std::max(0, top), std::max(0, right), std::max(0, bottom), std::max(0, left)}; requestRedraw(); }
+    void setTextInsets(int left, int top, int right, int bottom) { setTextOffset(top, right, bottom, left); }
+    Neu_TextOffset textOffset() const { return textOffset_; }
     void addRichTextFragment(const Neu_TextFragment& fragment) { richTextFragments_.push_back(fragment); requestRedraw(); }
     void clearRichTextFragments() { richTextFragments_.clear(); requestRedraw(); }
     const std::vector<Neu_TextFragment>& richTextFragments() const { return richTextFragments_; }
@@ -264,6 +330,7 @@ protected:
     bool wordWrap_{false};
     bool truncateText_{true};
     Neu_TextAlignment textAlignment_{Neu_TextAlignment::Left};
+    Neu_TextOffset textOffset_{};
     std::vector<Neu_TextFragment> richTextFragments_;
     Neu_IconBmp icon_;
     std::string iconPath_;
@@ -362,13 +429,28 @@ public:
     void bind(Neu_StringTable* model) { model_ = model; }
     Neu_StringTable* model() const { return model_; }
     Neu_TypedValue cellValue(size_t r, size_t c) const;
+    void setColumnWidths(const std::vector<int>& widths);
+    void setColumnWidth(size_t column, int width);
+    int columnWidth(size_t column) const;
+    void setHeaderResizable(bool enabled) { headerResizable_ = enabled; requestRedraw(); }
+    bool headerResizable() const { return headerResizable_; }
+    void setHeaderHeight(int height) { headerHeight_ = std::max(18, height); requestRedraw(); }
+    int headerHeight() const { return headerHeight_; }
     void setMultiSelect(bool enabled) { multiSelect_ = enabled; requestRedraw(); }
     bool multiSelect() const { return multiSelect_; }
     const std::set<int>& selectedRows() const { return selectedRows_; }
     void draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme) override;
     void handleXEvent(XEvent& ev) override;
-private:
+protected:
+    int effectiveColumnWidth(size_t column, int controlWidth = 0) const;
+    int totalColumnWidth(size_t columnCount, int controlWidth = 0) const;
     Neu_StringTable* model_{nullptr};
+    std::vector<int> columnWidths_;
+    int headerHeight_{24};
+    bool headerResizable_{true};
+    int resizingColumn_{-1};
+    int resizeStartX_{0};
+    int resizeStartWidth_{0};
     int selectedRow_{-1};
     int selectedCol_{-1};
     int hoveredRow_{-1};
@@ -389,6 +471,8 @@ public:
     void setMultiSelect(bool enabled) { multiSelect_ = enabled; requestRedraw(); }
     bool multiSelect() const { return multiSelect_; }
     const std::set<int>& selectedVisibleRows() const { return selectedVisibleRows_; }
+    void setTreeColumnWidth(int width) { treeColumnWidth_ = std::max(96, width); requestRedraw(); }
+    int treeColumnWidth() const { return treeColumnWidth_; }
     void draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme) override;
     void handleXEvent(XEvent& ev) override;
 
@@ -399,6 +483,10 @@ private:
     int anchorVisibleRow_{-1};
     bool multiSelect_{true};
     std::set<int> selectedVisibleRows_;
+    int treeColumnWidth_{260};
+    bool headerResizeActive_{false};
+    int headerResizeStartX_{0};
+    int headerResizeStartWidth_{0};
 };
 
 class Neu_Placement : public Neu_Control {
@@ -449,6 +537,7 @@ class Neu_ScrollWindow : public Neu_Placement {
 public:
     using Neu_Placement::Neu_Placement;
     const char* className() const override { return "Neu_ScrollWindow"; }
+    void add(std::shared_ptr<Neu_Control> child);
     void setContentSize(int width, int height) { setVirtualSize(width, height); setAutoScroll(true); }
     void draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme) override;
     void handleXEvent(XEvent& ev) override;
@@ -533,6 +622,147 @@ private:
     size_t iconIndexForText(const std::string& text) const;
 };
 
+
+class Neu_CheckBox : public Neu_Control {
+public:
+    using Neu_Control::Neu_Control;
+    const char* className() const override { return "Neu_CheckBox"; }
+    void setChecked(bool checked) { checked_ = checked; requestRedraw(); }
+    bool checked() const { return checked_; }
+    void draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme) override;
+    void handleXEvent(XEvent& ev) override;
+protected:
+    bool checked_{false};
+};
+
+class Neu_RadioButton : public Neu_CheckBox {
+public:
+    using Neu_CheckBox::Neu_CheckBox;
+    const char* className() const override { return "Neu_RadioButton"; }
+    void draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme) override;
+};
+
+class Neu_ToggleButton : public Neu_CheckBox {
+public:
+    using Neu_CheckBox::Neu_CheckBox;
+    const char* className() const override { return "Neu_ToggleButton"; }
+    void draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme) override;
+};
+
+class Neu_ProgressBar : public Neu_Control {
+public:
+    using Neu_Control::Neu_Control;
+    const char* className() const override { return "Neu_ProgressBar"; }
+    void setProgress(float progress) { progress_ = std::max(0.0f, std::min(1.0f, progress)); requestRedraw(); }
+    float progress() const { return progress_; }
+    void draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme) override;
+private:
+    float progress_{0.0f};
+};
+
+class Neu_Slider : public Neu_Control {
+public:
+    using Neu_Control::Neu_Control;
+    const char* className() const override { return "Neu_Slider"; }
+    void setRange(int minimum, int maximum) { min_ = minimum; max_ = std::max(minimum + 1, maximum); setValue(value_); }
+    void setValue(int value) { value_ = std::max(min_, std::min(max_, value)); requestRedraw(); }
+    int value() const { return value_; }
+    void setVertical(bool vertical) { vertical_ = vertical; requestRedraw(); }
+    bool vertical() const { return vertical_; }
+    void draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme) override;
+    void handleXEvent(XEvent& ev) override;
+private:
+    int min_{0};
+    int max_{100};
+    int value_{50};
+    bool vertical_{false};
+    bool dragging_{false};
+};
+
+class Neu_Spinner : public Neu_Control {
+public:
+    using Neu_Control::Neu_Control;
+    const char* className() const override { return "Neu_Spinner"; }
+    void setRange(int minimum, int maximum) { min_ = minimum; max_ = std::max(minimum, maximum); setValue(value_); }
+    void setValue(int value) { value_ = std::max(min_, std::min(max_, value)); setText(std::to_string(value_)); }
+    int value() const { return value_; }
+    void draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme) override;
+    void handleXEvent(XEvent& ev) override;
+private:
+    int min_{0};
+    int max_{100};
+    int value_{0};
+};
+
+class Neu_GroupBox : public Neu_Placement {
+public:
+    using Neu_Placement::Neu_Placement;
+    const char* className() const override { return "Neu_GroupBox"; }
+    void draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme) override;
+};
+
+class Neu_Separator : public Neu_Control {
+public:
+    using Neu_Control::Neu_Control;
+    const char* className() const override { return "Neu_Separator"; }
+    void setVertical(bool vertical) { vertical_ = vertical; requestRedraw(); }
+    void draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme) override;
+private:
+    bool vertical_{false};
+};
+
+class Neu_LinkLabel : public Neu_Label {
+public:
+    using Neu_Label::Neu_Label;
+    const char* className() const override { return "Neu_LinkLabel"; }
+    void draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme) override;
+    void handleXEvent(XEvent& ev) override;
+};
+
+class Neu_ToolBar : public Neu_Placement {
+public:
+    using Neu_Placement::Neu_Placement;
+    const char* className() const override { return "Neu_ToolBar"; }
+    void draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme) override;
+};
+
+class Neu_TabView : public Neu_Placement {
+public:
+    using Neu_Placement::Neu_Placement;
+    const char* className() const override { return "Neu_TabView"; }
+    int addTab(const std::string& title, std::shared_ptr<Neu_Placement> page);
+    void setSelectedTab(int index) { selectedTab_ = std::max(0, std::min(index, static_cast<int>(pages_.size()) - 1)); requestRedraw(); }
+    int selectedTab() const { return selectedTab_; }
+    void setParent(Neu_Window* parent) override;
+    void draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme) override;
+    void handleXEvent(XEvent& ev) override;
+private:
+    std::vector<std::string> titles_;
+    std::vector<std::shared_ptr<Neu_Placement>> pages_;
+    int selectedTab_{0};
+};
+
+class Neu_Splitter : public Neu_Placement {
+public:
+    using Neu_Placement::Neu_Placement;
+    const char* className() const override { return "Neu_Splitter"; }
+    void setVertical(bool vertical) { vertical_ = vertical; requestRedraw(); }
+    void setSplitPosition(int pixels) { splitPosition_ = std::max(24, pixels); requestRedraw(); }
+    int splitPosition() const { return splitPosition_; }
+    void draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme) override;
+    void handleXEvent(XEvent& ev) override;
+private:
+    bool vertical_{true};
+    int splitPosition_{160};
+    bool dragging_{false};
+};
+
+using Neu_TableView = Neu_ListView;
+using Neu_Table = Neu_ListView;
+using Neu_TextArea = Neu_Multilinetextbox;
+using Neu_Panel = Neu_Placement;
+using Neu_Composite = Neu_Placement;
+
 class Neu_Window {
 public:
     Neu_Window(Neu_Application& app, int width, int height, const std::string& title);
@@ -550,7 +780,7 @@ public:
     void handleXEvent(XEvent& ev);
     Window xid() const { return window_; }
     Neu_Theme& theme() { return theme_; }
-    void setTheme(const Neu_Theme& t) { theme_ = t; }
+    void setTheme(const Neu_Theme& t);
     void setOnClose(Neu_WindowCallback cb, void* user_data) { onClose_ = cb; closeUserData_ = user_data; }
     int width() const { return width_; }
     int height() const { return height_; }
@@ -597,6 +827,11 @@ Neu_SmoothGraphicsOptions Neu_GetSmoothGraphicsOptions();
 void Neu_EnableAntialiasing(bool enabled);
 void Neu_UseVirtualMachineFriendlyDefaults(bool enabled);
 void Neu_EnableMultiStageDoubleBuffering(bool enabled);
+void Neu_SetCurrentDrawingTheme(const Neu_Theme& theme);
+void Neu_ApplyThemeRenderingOptions(const Neu_Theme& theme);
+Neu_Color Neu_LightenColor(const Neu_Color& color, int amount);
+Neu_Color Neu_DarkenColor(const Neu_Color& color, int amount);
+Neu_Color Neu_MixColor(const Neu_Color& a, const Neu_Color& b, double t);
 void Neu_DrawRoundedRect(Display* d, Drawable drawable, GC gc, int x, int y, int w, int h, int radius, bool fill);
 void Neu_DrawSmoothRoundedRect(Display* d, Drawable drawable, GC gc, const Neu_Color& color, const Neu_Color& background, int x, int y, int w, int h, int radius, bool fill, int supersample = 4);
 void Neu_DrawSmoothDropShadow(Display* d, Drawable drawable, GC gc, const Neu_Color& shadow, const Neu_Color& background, int x, int y, int w, int h, int radius, int blur, int offsetX, int offsetY);

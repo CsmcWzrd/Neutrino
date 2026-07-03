@@ -6,12 +6,15 @@
 #include <windowsx.h>
 #include <commctrl.h>
 #include <algorithm>
+#include <cmath>
 #include <cwchar>
 #include <sstream>
+#include <cctype>
 
 namespace neutrino {
 
 static Neu_SmoothGraphicsOptions g_options{};
+static Neu_Theme g_currentDrawingTheme{};
 static const wchar_t* kNeuWindowClass = L"Neutrino_Neu_Window";
 static HINSTANCE g_instance = nullptr;
 static bool g_windowClassRegistered = false;
@@ -85,6 +88,81 @@ static std::string unescapeHashesWin32(const std::string& text)
 static COLORREF rgb(const Neu_Color& c)
 {
     return RGB(c.r, c.g, c.b);
+}
+
+Neu_Color Neu_LightenColor(const Neu_Color& color, int amount)
+{
+    auto add = [amount](uint8_t value) -> uint8_t {
+        return static_cast<uint8_t>(((static_cast<int>(value) + amount) > 255 ? 255 : (static_cast<int>(value) + amount)));
+    };
+    return {add(color.r), add(color.g), add(color.b), color.a};
+}
+
+Neu_Color Neu_DarkenColor(const Neu_Color& color, int amount)
+{
+    auto sub = [amount](uint8_t value) -> uint8_t {
+        return static_cast<uint8_t>(((static_cast<int>(value) - amount) < 0 ? 0 : (static_cast<int>(value) - amount)));
+    };
+    return {sub(color.r), sub(color.g), sub(color.b), color.a};
+}
+
+Neu_Color Neu_MixColor(const Neu_Color& a, const Neu_Color& b, double t)
+{
+    t = std::max(0.0, std::min(1.0, t));
+    auto mix = [t](uint8_t av, uint8_t bv) -> uint8_t {
+        return static_cast<uint8_t>(std::round(static_cast<double>(av) * (1.0 - t) + static_cast<double>(bv) * t));
+    };
+    return {mix(a.r, b.r), mix(a.g, b.g), mix(a.b, b.b), mix(a.a, b.a)};
+}
+
+
+static Neu_Theme makeThemeWin32(Neu_Color background,
+                                Neu_Color glass,
+                                Neu_Color border,
+                                Neu_Color text,
+                                Neu_Color accent,
+                                Neu_Color hover,
+                                Neu_Color pressed,
+                                Neu_Color shadow,
+                                Neu_Color hintBackground,
+                                Neu_Color hintBorder,
+                                int radius = 12,
+                                const std::string& font = "Segoe UI")
+{
+    Neu_Theme theme;
+    theme.background = background;
+    theme.glass = glass;
+    theme.border = border;
+    theme.text = text;
+    theme.accent = accent;
+    theme.hover = hover;
+    theme.pressed = pressed;
+    theme.highlight = hover;
+    theme.focus = Neu_DarkenColor(accent, 56);
+    theme.controlGradientTop = Neu_LightenColor(glass, 24);
+    theme.controlGradientBottom = Neu_DarkenColor(glass, 20);
+    theme.shadow = shadow;
+    theme.hintBackground = hintBackground;
+    theme.hintBorder = hintBorder;
+    theme.radius = radius;
+    theme.edgeSize = std::max(4, std::min(14, radius + 4));
+    theme.gradientControls = true;
+    theme.setDefaultEdgeCorners();
+    theme.antiAliasMode = Neu_AntiAliasMode::DAA;
+    theme.antiAliasSamples = 3;
+    theme.fontName = font;
+    return theme;
+}
+
+static std::string lowerNameWin32(std::string value)
+{
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    value.erase(std::remove(value.begin(), value.end(), ' '), value.end());
+    value.erase(std::remove(value.begin(), value.end(), '_'), value.end());
+    value.erase(std::remove(value.begin(), value.end(), '-'), value.end());
+    return value;
 }
 
 static HFONT uiFont()
@@ -161,6 +239,61 @@ static std::vector<std::string> splitPreserveLinesWin32(const std::string& text)
     return logicalLinesWin32(text);
 }
 
+static size_t lineStartOffsetWin32(const std::string& text, int targetLine)
+{
+    int line = 0;
+    size_t start = 0;
+    for (size_t i = 0; i < text.size() && line < targetLine; ++i) {
+        if (text[i] == '\r') {
+            if (i + 1 < text.size() && text[i + 1] == '\n') {
+                ++i;
+            }
+            start = i + 1;
+            ++line;
+        } else if (text[i] == '\n') {
+            start = i + 1;
+            ++line;
+        }
+    }
+    return std::min(start, text.size());
+}
+
+static size_t lineEndOffsetWin32(const std::string& text, size_t start)
+{
+    size_t end = start;
+    while (end < text.size() && text[end] != '\n' && text[end] != '\r') {
+        ++end;
+    }
+    return end;
+}
+
+static int byteOffsetFromXWin32(HDC hdc, const std::string& text, size_t start, size_t end, int x, bool monospace)
+{
+    size_t cursor = start;
+    for (size_t i = start + 1; i <= end; ++i) {
+        const std::string prefix = text.substr(start, i - start);
+        int width = static_cast<int>(prefix.size()) * (monospace ? 8 : 7);
+        if (hdc) {
+            HFONT font = createTextFont(false, false, false, false, monospace, 0);
+            HGDIOBJ oldFont = SelectObject(hdc, font ? font : uiFont());
+            std::wstring wide = toWide(prefix);
+            SIZE sz{};
+            GetTextExtentPoint32W(hdc, wide.c_str(), static_cast<int>(wide.size()), &sz);
+            width = sz.cx;
+            SelectObject(hdc, oldFont);
+            if (font) {
+                DeleteObject(font);
+            }
+        }
+        if (width <= x) {
+            cursor = i;
+        } else {
+            break;
+        }
+    }
+    return static_cast<int>(cursor);
+}
+
 static int lineHeightForHeadingWin32(int headingLevel)
 {
     if (headingLevel > 0) {
@@ -200,18 +333,229 @@ static RECT safeRectWin32(int left, int top, int right, int bottom)
     return RECT{left, top, right, bottom};
 }
 
-static void fillRound(HDC hdc, const Neu_Rect& r, int radius, COLORREF fill, COLORREF border)
+static void drawArrowWin32(HDC hdc, int centerX, int centerY, bool up, COLORREF color)
 {
-    HBRUSH brush = CreateSolidBrush(fill);
-    HPEN pen = CreatePen(PS_SOLID, 1, border);
+    POINT points[3]{};
+    if (up) {
+        points[0] = POINT{centerX, centerY - 4};
+        points[1] = POINT{centerX - 5, centerY + 3};
+        points[2] = POINT{centerX + 5, centerY + 3};
+    } else {
+        points[0] = POINT{centerX - 5, centerY - 3};
+        points[1] = POINT{centerX + 5, centerY - 3};
+        points[2] = POINT{centerX, centerY + 4};
+    }
+    HBRUSH brush = CreateSolidBrush(color);
+    HPEN pen = CreatePen(PS_SOLID, 1, color);
     HGDIOBJ oldBrush = SelectObject(hdc, brush);
     HGDIOBJ oldPen = SelectObject(hdc, pen);
-    RoundRect(hdc, r.x, r.y, r.x + r.width, r.y + r.height, radius * 2, radius * 2);
+    Polygon(hdc, points, 3);
+    SelectObject(hdc, oldPen);
+    SelectObject(hdc, oldBrush);
+    DeleteObject(pen);
+    DeleteObject(brush);
+}
+
+static void drawSupersampledEllipseWin32(HDC hdc, const RECT& dest, COLORREF background, COLORREF fill, COLORREF outline, bool filled)
+{
+    const int w = neuMaxIntWin32(1, static_cast<int>(dest.right - dest.left));
+    const int h = neuMaxIntWin32(1, static_cast<int>(dest.bottom - dest.top));
+    constexpr int scale = 3;
+    HDC mem = CreateCompatibleDC(hdc);
+    HBITMAP bmp = CreateCompatibleBitmap(hdc, w * scale, h * scale);
+    HGDIOBJ oldBmp = SelectObject(mem, bmp);
+    RECT mr{0, 0, w * scale, h * scale};
+    HBRUSH bg = CreateSolidBrush(background);
+    FillRect(mem, &mr, bg);
+    DeleteObject(bg);
+    HPEN pen = CreatePen(PS_SOLID, scale, outline);
+    HBRUSH brush = filled ? CreateSolidBrush(fill) : reinterpret_cast<HBRUSH>(GetStockObject(NULL_BRUSH));
+    HGDIOBJ oldPen = SelectObject(mem, pen);
+    HGDIOBJ oldBrush = SelectObject(mem, brush);
+    Ellipse(mem, scale, scale, w * scale - scale, h * scale - scale);
+    SelectObject(mem, oldBrush);
+    SelectObject(mem, oldPen);
+    DeleteObject(pen);
+    if (filled) {
+        DeleteObject(brush);
+    }
+    int oldMode = SetStretchBltMode(hdc, HALFTONE);
+    SetBrushOrgEx(hdc, 0, 0, nullptr);
+    StretchBlt(hdc, dest.left, dest.top, w, h, mem, 0, 0, w * scale, h * scale, SRCCOPY);
+    SetStretchBltMode(hdc, oldMode);
+    SelectObject(mem, oldBmp);
+    DeleteObject(bmp);
+    DeleteDC(mem);
+}
+
+static void drawSupersampledRoundRectWin32(HDC hdc, const RECT& dest, int radius, COLORREF background, COLORREF fill, COLORREF outline, bool filled)
+{
+    const int w = neuMaxIntWin32(1, static_cast<int>(dest.right - dest.left));
+    const int h = neuMaxIntWin32(1, static_cast<int>(dest.bottom - dest.top));
+    constexpr int scale = 3;
+    HDC mem = CreateCompatibleDC(hdc);
+    HBITMAP bmp = CreateCompatibleBitmap(hdc, w * scale, h * scale);
+    HGDIOBJ oldBmp = SelectObject(mem, bmp);
+    RECT mr{0, 0, w * scale, h * scale};
+    HBRUSH bg = CreateSolidBrush(background);
+    FillRect(mem, &mr, bg);
+    DeleteObject(bg);
+    HPEN pen = CreatePen(PS_SOLID, scale, outline);
+    HBRUSH brush = filled ? CreateSolidBrush(fill) : reinterpret_cast<HBRUSH>(GetStockObject(NULL_BRUSH));
+    HGDIOBJ oldPen = SelectObject(mem, pen);
+    HGDIOBJ oldBrush = SelectObject(mem, brush);
+    RoundRect(mem, scale, scale, w * scale - scale, h * scale - scale, radius * scale * 2, radius * scale * 2);
+    SelectObject(mem, oldBrush);
+    SelectObject(mem, oldPen);
+    DeleteObject(pen);
+    if (filled) {
+        DeleteObject(brush);
+    }
+    int oldMode = SetStretchBltMode(hdc, HALFTONE);
+    SetBrushOrgEx(hdc, 0, 0, nullptr);
+    StretchBlt(hdc, dest.left, dest.top, w, h, mem, 0, 0, w * scale, h * scale, SRCCOPY);
+    SetStretchBltMode(hdc, oldMode);
+    SelectObject(mem, oldBmp);
+    DeleteObject(bmp);
+    DeleteDC(mem);
+}
+
+static RECT insetRectWin32(const Neu_Rect& r, int left, int top, int right, int bottom)
+{
+    return safeRectWin32(r.x + left, r.y + top, r.x + r.width - right, r.y + r.height - bottom);
+}
+
+static void drawCenteredTriangleWin32(HDC hdc, COLORREF color, int cx, int cy, bool up)
+{
+    POINT pts[3]{};
+    const int halfWidth = 4;
+    const int halfHeight = 3;
+    if (up) {
+        pts[0] = POINT{cx, cy - halfHeight};
+        pts[1] = POINT{cx - halfWidth, cy + halfHeight};
+        pts[2] = POINT{cx + halfWidth, cy + halfHeight};
+    } else {
+        pts[0] = POINT{cx - halfWidth, cy - halfHeight};
+        pts[1] = POINT{cx + halfWidth, cy - halfHeight};
+        pts[2] = POINT{cx, cy + halfHeight};
+    }
+    HBRUSH brush = CreateSolidBrush(color);
+    HPEN pen = CreatePen(PS_SOLID, 1, color);
+    HGDIOBJ oldBrush = SelectObject(hdc, brush);
+    HGDIOBJ oldPen = SelectObject(hdc, pen);
+    Polygon(hdc, pts, 3);
+    SelectObject(hdc, oldPen);
+    SelectObject(hdc, oldBrush);
+    DeleteObject(pen);
+    DeleteObject(brush);
+}
+
+static COLORREF mixColorRefWin32(COLORREF a, COLORREF b, double t)
+{
+    t = std::max(0.0, std::min(1.0, t));
+    auto mix = [t](int av, int bv) -> BYTE {
+        return static_cast<BYTE>(std::round(static_cast<double>(av) * (1.0 - t) + static_cast<double>(bv) * t));
+    };
+    return RGB(mix(GetRValue(a), GetRValue(b)), mix(GetGValue(a), GetGValue(b)), mix(GetBValue(a), GetBValue(b)));
+}
+
+static bool hasEdgeCornersWin32(const Neu_Theme& theme)
+{
+    return theme.topLeftCorner == Neu_CornerStyle::EdgeCorner
+           || theme.topRightCorner == Neu_CornerStyle::EdgeCorner
+           || theme.bottomLeftCorner == Neu_CornerStyle::EdgeCorner
+           || theme.bottomRightCorner == Neu_CornerStyle::EdgeCorner;
+}
+
+static void beginThemedRectPathWin32(HDC hdc, const Neu_Rect& r, int radius)
+{
+    BeginPath(hdc);
+    if (!hasEdgeCornersWin32(g_currentDrawingTheme)) {
+        RoundRect(hdc, r.x, r.y, r.x + r.width, r.y + r.height, radius * 2, radius * 2);
+    } else {
+        const int e = neuMaxIntWin32(0, neuMinIntWin32(g_currentDrawingTheme.edgeSize, neuMinIntWin32(r.width, r.height) / 2));
+        const int tl = g_currentDrawingTheme.topLeftCorner == Neu_CornerStyle::EdgeCorner ? e : 0;
+        const int tr = g_currentDrawingTheme.topRightCorner == Neu_CornerStyle::EdgeCorner ? e : 0;
+        const int bl = g_currentDrawingTheme.bottomLeftCorner == Neu_CornerStyle::EdgeCorner ? e : 0;
+        const int br = g_currentDrawingTheme.bottomRightCorner == Neu_CornerStyle::EdgeCorner ? e : 0;
+        POINT pts[8]{
+            POINT{r.x + tl, r.y},
+            POINT{r.x + r.width - tr, r.y},
+            POINT{r.x + r.width, r.y + tr},
+            POINT{r.x + r.width, r.y + r.height - br},
+            POINT{r.x + r.width - br, r.y + r.height},
+            POINT{r.x + bl, r.y + r.height},
+            POINT{r.x, r.y + r.height - bl},
+            POINT{r.x, r.y + tl}
+        };
+        Polygon(hdc, pts, 8);
+    }
+    EndPath(hdc);
+}
+
+static void strokeThemedRectWin32(HDC hdc, const Neu_Rect& r, int radius, COLORREF border)
+{
+    HPEN pen = CreatePen(PS_SOLID, 1, border);
+    HGDIOBJ oldPen = SelectObject(hdc, pen);
+    HGDIOBJ oldBrush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
+    if (!hasEdgeCornersWin32(g_currentDrawingTheme)) {
+        RoundRect(hdc, r.x, r.y, r.x + r.width, r.y + r.height, radius * 2, radius * 2);
+    } else {
+        const int e = neuMaxIntWin32(0, neuMinIntWin32(g_currentDrawingTheme.edgeSize, neuMinIntWin32(r.width, r.height) / 2));
+        const int tl = g_currentDrawingTheme.topLeftCorner == Neu_CornerStyle::EdgeCorner ? e : 0;
+        const int tr = g_currentDrawingTheme.topRightCorner == Neu_CornerStyle::EdgeCorner ? e : 0;
+        const int bl = g_currentDrawingTheme.bottomLeftCorner == Neu_CornerStyle::EdgeCorner ? e : 0;
+        const int br = g_currentDrawingTheme.bottomRightCorner == Neu_CornerStyle::EdgeCorner ? e : 0;
+        POINT pts[9]{
+            POINT{r.x + tl, r.y},
+            POINT{r.x + r.width - tr, r.y},
+            POINT{r.x + r.width, r.y + tr},
+            POINT{r.x + r.width, r.y + r.height - br},
+            POINT{r.x + r.width - br, r.y + r.height},
+            POINT{r.x + bl, r.y + r.height},
+            POINT{r.x, r.y + r.height - bl},
+            POINT{r.x, r.y + tl},
+            POINT{r.x + tl, r.y}
+        };
+        Polyline(hdc, pts, 9);
+    }
     SelectObject(hdc, oldBrush);
     SelectObject(hdc, oldPen);
-    DeleteObject(brush);
     DeleteObject(pen);
 }
+
+static void fillRound(HDC hdc, const Neu_Rect& r, int radius, COLORREF fill, COLORREF border)
+{
+    if (!hdc || r.width <= 0 || r.height <= 0) {
+        return;
+    }
+
+    int saved = SaveDC(hdc);
+    beginThemedRectPathWin32(hdc, r, radius);
+    SelectClipPath(hdc, RGN_AND);
+
+    if (g_currentDrawingTheme.gradientControls) {
+        const COLORREF top = mixColorRefWin32(fill, rgb(g_currentDrawingTheme.controlGradientTop), 0.42);
+        const COLORREF bottom = mixColorRefWin32(fill, rgb(g_currentDrawingTheme.controlGradientBottom), 0.42);
+        for (int yy = 0; yy < r.height; ++yy) {
+            const double t = static_cast<double>(yy) / static_cast<double>(neuMaxIntWin32(1, r.height - 1));
+            const COLORREF lineColor = mixColorRefWin32(top, bottom, t);
+            HBRUSH brush = CreateSolidBrush(lineColor);
+            RECT line{r.x, r.y + yy, r.x + r.width, r.y + yy + 1};
+            FillRect(hdc, &line, brush);
+            DeleteObject(brush);
+        }
+    } else {
+        HBRUSH brush = CreateSolidBrush(fill);
+        RECT rect{r.x, r.y, r.x + r.width, r.y + r.height};
+        FillRect(hdc, &rect, brush);
+        DeleteObject(brush);
+    }
+
+    RestoreDC(hdc, saved);
+    strokeThemedRectWin32(hdc, r, radius, border);
+}
+
 
 static uint16_t read16(const std::vector<uint8_t>& bytes, size_t offset)
 {
@@ -417,6 +761,8 @@ Neu_Color Neu_PixelToColor(Display*, unsigned long pixel)
 void Neu_SetSmoothGraphicsOptions(const Neu_SmoothGraphicsOptions& options)
 {
     g_options = options;
+    g_options.supersample = std::max(1, std::min(8, g_options.supersample));
+    g_options.bufferStages = std::max(1, std::min(3, g_options.bufferStages));
 }
 
 Neu_SmoothGraphicsOptions Neu_GetSmoothGraphicsOptions()
@@ -445,17 +791,39 @@ void Neu_EnableMultiStageDoubleBuffering(bool enabled)
     g_options.multiStageDoubleBuffering = enabled;
 }
 
+void Neu_ApplyThemeRenderingOptions(const Neu_Theme& theme)
+{
+    if (g_options.vmFriendly) {
+        return;
+    }
+    g_options.enabled = true;
+    if (theme.antiAliasMode == Neu_AntiAliasMode::SSAA) {
+        g_options.backend = Neu_GraphicsBackend::SoftwareAntialias;
+        g_options.supersample = std::max(4, std::min(8, theme.antiAliasSamples));
+    } else if (theme.antiAliasMode == Neu_AntiAliasMode::MSAA) {
+        g_options.backend = Neu_GraphicsBackend::SoftwareAntialias;
+        g_options.supersample = std::max(3, std::min(6, theme.antiAliasSamples));
+    } else {
+        g_options.backend = Neu_GraphicsBackend::XRenderAntialias;
+        g_options.supersample = std::max(2, std::min(4, theme.antiAliasSamples));
+    }
+}
+
+void Neu_SetCurrentDrawingTheme(const Neu_Theme& theme)
+{
+    g_currentDrawingTheme = theme;
+    Neu_ApplyThemeRenderingOptions(theme);
+}
+
 void Neu_DrawRoundedRect(Display*, Drawable drawable, GC, int x, int y, int w, int h, int radius, bool fill)
 {
     Neu_Rect r{x, y, w, h};
-    COLORREF border = RGB(110, 130, 160);
-    COLORREF color = fill ? RGB(236, 244, 255) : RGB(255, 255, 255);
-    fillRound(drawable, r, radius, color, border);
+    fillRound(drawable, r, radius, rgb(fill ? g_currentDrawingTheme.glass : g_currentDrawingTheme.border), rgb(g_currentDrawingTheme.border));
 }
 
 void Neu_DrawSmoothRoundedRect(Display*, Drawable drawable, GC, const Neu_Color& color, const Neu_Color&, int x, int y, int w, int h, int radius, bool, int)
 {
-    fillRound(drawable, Neu_Rect{x, y, w, h}, radius, rgb(color), RGB(110, 130, 160));
+    fillRound(drawable, Neu_Rect{x, y, w, h}, radius, rgb(color), rgb(g_currentDrawingTheme.border));
 }
 
 void Neu_DrawSmoothDropShadow(Display*, Drawable drawable, GC, const Neu_Color& shadow, const Neu_Color&, int x, int y, int w, int h, int radius, int, int offsetX, int offsetY)
@@ -464,40 +832,267 @@ void Neu_DrawSmoothDropShadow(Display*, Drawable drawable, GC, const Neu_Color& 
         return;
     }
 
+    const Neu_Rect sr{x + offsetX, y + offsetY, w, h};
+    int saved = SaveDC(drawable);
+    beginThemedRectPathWin32(drawable, sr, radius);
     HBRUSH brush = CreateSolidBrush(RGB(shadow.r, shadow.g, shadow.b));
     HPEN pen = CreatePen(PS_SOLID, 1, RGB(shadow.r, shadow.g, shadow.b));
     HGDIOBJ oldBrush = SelectObject(drawable, brush);
     HGDIOBJ oldPen = SelectObject(drawable, pen);
-    RoundRect(drawable, x + offsetX, y + offsetY, x + offsetX + w, y + offsetY + h, radius * 2, radius * 2);
-    SelectObject(drawable, oldBrush);
-    SelectObject(drawable, oldPen);
-    DeleteObject(brush);
+    FillPath(drawable);
+    RestoreDC(drawable, saved);
     DeleteObject(pen);
+    DeleteObject(brush);
 }
+
+namespace {
+
+static Neu_Theme makeTheme(Neu_Color background,
+                           Neu_Color glass,
+                           Neu_Color border,
+                           Neu_Color text,
+                           Neu_Color accent,
+                           Neu_Color hover,
+                           Neu_Color pressed,
+                           Neu_Color shadow,
+                           Neu_Color hintBackground,
+                           Neu_Color hintBorder,
+                           int radius = 12,
+                           const std::string& font = "DejaVu Sans:size=10:antialias=true:hinting=true:hintstyle=hintfull:rgba=rgb:lcdfilter=lcddefault")
+{
+    Neu_Theme theme;
+    theme.background = background;
+    theme.glass = glass;
+    theme.border = border;
+    theme.text = text;
+    theme.accent = accent;
+    theme.hover = hover;
+    theme.pressed = pressed;
+    theme.highlight = hover;
+    theme.focus = Neu_DarkenColor(accent, 56);
+    theme.controlGradientTop = Neu_LightenColor(glass, 24);
+    theme.controlGradientBottom = Neu_DarkenColor(glass, 20);
+    theme.shadow = shadow;
+    theme.hintBackground = hintBackground;
+    theme.hintBorder = hintBorder;
+    theme.radius = radius;
+    theme.edgeSize = std::max(4, std::min(14, radius + 4));
+    theme.gradientControls = true;
+    theme.setDefaultEdgeCorners();
+    theme.antiAliasMode = Neu_AntiAliasMode::DAA;
+    theme.antiAliasSamples = 3;
+    theme.fontName = font;
+    return theme;
+}
+
+static std::string lowerName(std::string value)
+{
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    value.erase(std::remove(value.begin(), value.end(), ' '), value.end());
+    value.erase(std::remove(value.begin(), value.end(), '_'), value.end());
+    value.erase(std::remove(value.begin(), value.end(), '-'), value.end());
+    return value;
+}
+
+} // namespace
 
 Neu_Theme Neu_Theme::Light()
 {
-    return Neu_Theme{};
+    return makeTheme({245, 248, 252, 255}, {238, 246, 255, 235}, {150, 175, 205, 255}, {20, 28, 38, 255}, {70, 135, 220, 255}, {225, 238, 255, 255}, {190, 215, 250, 255}, {36, 52, 70, 85}, {255, 255, 232, 245}, {118, 132, 72, 255}, 12);
 }
 
 Neu_Theme Neu_Theme::Dark()
 {
-    Neu_Theme t{};
-    t.background = {32, 36, 42, 255};
-    t.glass = {52, 58, 70, 230};
-    t.text = {245, 245, 245, 255};
-    t.border = {95, 118, 150, 255};
-    t.hover = {72, 85, 105, 255};
-    return t;
+    return makeTheme({24, 28, 34, 255}, {42, 48, 58, 230}, {90, 105, 125, 255}, {235, 240, 248, 255}, {105, 160, 245, 255}, {55, 64, 78, 255}, {70, 85, 105, 255}, {0, 0, 0, 125}, {52, 58, 68, 250}, {145, 165, 200, 255}, 12);
 }
 
 Neu_Theme Neu_Theme::BlueGlass()
 {
-    Neu_Theme t{};
-    t.background = {232, 242, 255, 255};
-    t.glass = {218, 236, 255, 230};
-    t.accent = {35, 115, 220, 255};
+    return makeTheme({222, 237, 255, 255}, {240, 248, 255, 230}, {100, 150, 210, 255}, {10, 35, 70, 255}, {20, 100, 210, 255}, {224, 240, 255, 255}, {184, 215, 250, 255}, {30, 64, 110, 95}, {246, 251, 255, 250}, {95, 135, 190, 255}, 14);
+}
+
+Neu_Theme Neu_Theme::Win95()
+{
+    Neu_Theme t = makeTheme({0, 128, 128, 255}, {192, 192, 192, 255}, {128, 128, 128, 255}, {0, 0, 0, 255}, {0, 0, 128, 255}, {224, 224, 224, 255}, {160, 160, 160, 255}, {70, 70, 70, 85}, {255, 255, 225, 255}, {128, 128, 0, 255}, 0, "DejaVu Sans:size=10:antialias=true");
+    t.shadowSize = 3;
+    t.shadowOffsetX = 2;
+    t.shadowOffsetY = 2;
     return t;
+}
+
+Neu_Theme Neu_Theme::WinXP()
+{
+    return makeTheme({236, 243, 252, 255}, {222, 234, 255, 255}, {59, 97, 156, 255}, {0, 0, 0, 255}, {49, 106, 197, 255}, {255, 238, 194, 255}, {251, 194, 94, 255}, {40, 62, 110, 95}, {255, 255, 225, 255}, {160, 140, 80, 255}, 8, "Tahoma:size=10:antialias=true");
+}
+
+Neu_Theme Neu_Theme::Win10()
+{
+    return makeTheme({243, 243, 243, 255}, {255, 255, 255, 240}, {210, 210, 210, 255}, {32, 32, 32, 255}, {0, 120, 215, 255}, {229, 241, 251, 255}, {204, 228, 247, 255}, {0, 0, 0, 85}, {255, 255, 225, 255}, {120, 120, 80, 255}, 2, "Segoe UI:size=10:antialias=true");
+}
+
+Neu_Theme Neu_Theme::Win11()
+{
+    return makeTheme({249, 249, 249, 255}, {255, 255, 255, 235}, {225, 225, 225, 255}, {32, 32, 32, 255}, {0, 103, 192, 255}, {238, 246, 255, 255}, {213, 234, 255, 255}, {0, 0, 0, 70}, {255, 255, 240, 250}, {120, 120, 90, 255}, 10, "Segoe UI Variable:size=10:antialias=true");
+}
+
+Neu_Theme Neu_Theme::ClassicMotif()
+{
+    return makeTheme({174, 178, 195, 255}, {210, 213, 224, 255}, {93, 98, 114, 255}, {24, 24, 24, 255}, {55, 85, 150, 255}, {226, 228, 236, 255}, {185, 190, 204, 255}, {70, 70, 90, 80}, {255, 255, 220, 255}, {100, 100, 80, 255}, 2);
+}
+
+Neu_Theme Neu_Theme::SolarizedLight()
+{
+    return makeTheme({253, 246, 227, 255}, {238, 232, 213, 235}, {147, 161, 161, 255}, {101, 123, 131, 255}, {38, 139, 210, 255}, {232, 225, 202, 255}, {220, 210, 185, 255}, {88, 110, 117, 70}, {255, 252, 230, 250}, {181, 137, 0, 255}, 10);
+}
+
+Neu_Theme Neu_Theme::SolarizedDark()
+{
+    return makeTheme({0, 43, 54, 255}, {7, 54, 66, 235}, {88, 110, 117, 255}, {131, 148, 150, 255}, {38, 139, 210, 255}, {12, 69, 83, 255}, {20, 83, 98, 255}, {0, 0, 0, 130}, {7, 54, 66, 250}, {181, 137, 0, 255}, 10);
+}
+
+Neu_Theme Neu_Theme::Nord()
+{
+    return makeTheme({46, 52, 64, 255}, {59, 66, 82, 235}, {76, 86, 106, 255}, {236, 239, 244, 255}, {136, 192, 208, 255}, {67, 76, 94, 255}, {94, 129, 172, 255}, {0, 0, 0, 110}, {59, 66, 82, 250}, {129, 161, 193, 255}, 12);
+}
+
+Neu_Theme Neu_Theme::Dracula()
+{
+    return makeTheme({40, 42, 54, 255}, {68, 71, 90, 235}, {98, 114, 164, 255}, {248, 248, 242, 255}, {189, 147, 249, 255}, {80, 82, 105, 255}, {139, 233, 253, 255}, {0, 0, 0, 120}, {68, 71, 90, 250}, {255, 121, 198, 255}, 12);
+}
+
+Neu_Theme Neu_Theme::GruvboxLight()
+{
+    return makeTheme({251, 241, 199, 255}, {235, 219, 178, 235}, {168, 153, 132, 255}, {60, 56, 54, 255}, {69, 133, 136, 255}, {242, 229, 188, 255}, {213, 196, 161, 255}, {80, 73, 69, 80}, {251, 241, 199, 250}, {181, 118, 20, 255}, 8);
+}
+
+Neu_Theme Neu_Theme::GruvboxDark()
+{
+    return makeTheme({40, 40, 40, 255}, {60, 56, 54, 235}, {102, 92, 84, 255}, {235, 219, 178, 255}, {250, 189, 47, 255}, {80, 73, 69, 255}, {104, 157, 106, 255}, {0, 0, 0, 130}, {60, 56, 54, 250}, {214, 93, 14, 255}, 8);
+}
+
+Neu_Theme Neu_Theme::HighContrastLight()
+{
+    return makeTheme({255, 255, 255, 255}, {255, 255, 255, 255}, {0, 0, 0, 255}, {0, 0, 0, 255}, {0, 0, 255, 255}, {220, 235, 255, 255}, {190, 215, 255, 255}, {0, 0, 0, 90}, {255, 255, 210, 255}, {0, 0, 0, 255}, 0);
+}
+
+Neu_Theme Neu_Theme::HighContrastDark()
+{
+    return makeTheme({0, 0, 0, 255}, {0, 0, 0, 255}, {255, 255, 255, 255}, {255, 255, 255, 255}, {255, 255, 0, 255}, {40, 40, 40, 255}, {70, 70, 70, 255}, {0, 0, 0, 0}, {0, 0, 0, 255}, {255, 255, 0, 255}, 0);
+}
+
+Neu_Theme Neu_Theme::UbuntuAubergine()
+{
+    return makeTheme({48, 10, 36, 255}, {246, 244, 241, 240}, {174, 167, 159, 255}, {45, 45, 45, 255}, {233, 84, 32, 255}, {255, 240, 230, 255}, {238, 177, 151, 255}, {0, 0, 0, 95}, {255, 247, 230, 250}, {150, 80, 40, 255}, 9, "Ubuntu:size=10:antialias=true");
+}
+
+Neu_Theme Neu_Theme::KDEBreeze()
+{
+    return makeTheme({239, 240, 241, 255}, {252, 252, 252, 240}, {189, 195, 199, 255}, {35, 38, 41, 255}, {61, 174, 233, 255}, {227, 244, 255, 255}, {199, 228, 247, 255}, {0, 0, 0, 70}, {255, 255, 230, 250}, {110, 125, 130, 255}, 5, "Noto Sans:size=10:antialias=true");
+}
+
+Neu_Theme Neu_Theme::MacAqua()
+{
+    return makeTheme({236, 238, 241, 255}, {255, 255, 255, 238}, {180, 185, 194, 255}, {30, 30, 30, 255}, {0, 122, 255, 255}, {232, 243, 255, 255}, {207, 229, 255, 255}, {0, 0, 0, 75}, {255, 255, 230, 250}, {130, 130, 90, 255}, 11, "San Francisco:size=10:antialias=true");
+}
+
+Neu_Theme Neu_Theme::MaterialLight()
+{
+    return makeTheme({250, 250, 250, 255}, {255, 255, 255, 240}, {224, 224, 224, 255}, {33, 33, 33, 255}, {33, 150, 243, 255}, {227, 242, 253, 255}, {187, 222, 251, 255}, {0, 0, 0, 80}, {255, 253, 231, 250}, {158, 158, 158, 255}, 6, "Roboto:size=10:antialias=true");
+}
+
+Neu_Theme Neu_Theme::MaterialDark()
+{
+    Neu_Theme t = makeTheme({18, 18, 18, 255}, {30, 30, 34, 240}, {62, 66, 74, 255}, {238, 238, 238, 255}, {144, 202, 249, 255}, {64, 76, 92, 255}, {56, 60, 68, 255}, {0, 0, 0, 140}, {34, 34, 38, 250}, {144, 202, 249, 255}, 10, "Segoe UI");
+    t.focus = {42, 112, 178, 255};
+    t.controlGradientTop = {58, 62, 70, 255};
+    t.controlGradientBottom = {22, 24, 30, 255};
+    t.edgeSize = 8;
+    t.antiAliasMode = Neu_AntiAliasMode::SSAA;
+    t.antiAliasSamples = 4;
+    t.setDefaultEdgeCorners();
+    return t;
+}
+
+Neu_Theme Neu_Theme::Ocean()
+{
+    return makeTheme({8, 54, 78, 255}, {221, 245, 252, 230}, {64, 164, 196, 255}, {4, 40, 56, 255}, {0, 157, 196, 255}, {198, 235, 247, 255}, {158, 215, 235, 255}, {0, 30, 50, 95}, {232, 251, 255, 250}, {0, 120, 160, 255}, 13);
+}
+
+Neu_Theme Neu_Theme::Forest()
+{
+    return makeTheme({30, 64, 42, 255}, {235, 248, 235, 230}, {91, 140, 92, 255}, {28, 50, 30, 255}, {54, 136, 74, 255}, {219, 242, 220, 255}, {184, 224, 188, 255}, {0, 40, 0, 90}, {250, 255, 232, 250}, {91, 120, 60, 255}, 12);
+}
+
+Neu_Theme Neu_Theme::Rose()
+{
+    return makeTheme({255, 242, 246, 255}, {255, 250, 252, 235}, {224, 143, 166, 255}, {82, 29, 45, 255}, {214, 65, 112, 255}, {255, 232, 239, 255}, {246, 199, 214, 255}, {80, 0, 30, 70}, {255, 250, 230, 250}, {190, 90, 120, 255}, 14);
+}
+
+Neu_Theme Neu_Theme::Amber()
+{
+    return makeTheme({255, 248, 225, 255}, {255, 253, 240, 235}, {212, 163, 60, 255}, {65, 48, 20, 255}, {255, 152, 0, 255}, {255, 239, 190, 255}, {255, 213, 128, 255}, {80, 55, 0, 70}, {255, 255, 232, 250}, {180, 120, 40, 255}, 10);
+}
+
+Neu_Theme Neu_Theme::Slate()
+{
+    return makeTheme({226, 232, 240, 255}, {248, 250, 252, 235}, {148, 163, 184, 255}, {30, 41, 59, 255}, {59, 130, 246, 255}, {241, 245, 249, 255}, {203, 213, 225, 255}, {15, 23, 42, 70}, {255, 255, 230, 250}, {100, 116, 139, 255}, 10);
+}
+
+Neu_Theme Neu_Theme::Candy()
+{
+    return makeTheme({255, 245, 252, 255}, {255, 255, 255, 238}, {190, 160, 230, 255}, {76, 42, 100, 255}, {236, 72, 153, 255}, {245, 230, 255, 255}, {244, 194, 230, 255}, {90, 40, 120, 70}, {255, 250, 240, 250}, {190, 120, 200, 255}, 16);
+}
+
+Neu_Theme Neu_Theme::TerminalGreen()
+{
+    return makeTheme({0, 20, 0, 255}, {0, 35, 0, 240}, {0, 128, 0, 255}, {160, 255, 160, 255}, {0, 255, 65, 255}, {0, 55, 0, 255}, {0, 85, 0, 255}, {0, 0, 0, 130}, {0, 40, 0, 250}, {0, 255, 65, 255}, 4, "DejaVu Sans Mono:size=10:antialias=true");
+}
+
+Neu_Theme Neu_Theme::CorporateBlue()
+{
+    return makeTheme({237, 242, 248, 255}, {255, 255, 255, 238}, {166, 184, 204, 255}, {25, 42, 63, 255}, {31, 85, 158, 255}, {225, 237, 252, 255}, {198, 219, 245, 255}, {20, 40, 80, 65}, {255, 255, 232, 250}, {114, 132, 155, 255}, 8);
+}
+
+std::vector<std::string> Neu_Theme::BuiltInThemeNames()
+{
+    return {"MaterialDark", "Light", "Dark", "BlueGlass", "Win95", "WinXP", "Win10", "Win11", "ClassicMotif", "SolarizedLight", "SolarizedDark", "Nord", "Dracula", "GruvboxLight", "GruvboxDark", "HighContrastLight", "HighContrastDark", "UbuntuAubergine", "KDEBreeze", "MacAqua", "MaterialLight", "Ocean", "Forest", "Rose", "Amber", "Slate", "Candy", "TerminalGreen", "CorporateBlue"};
+}
+
+Neu_Theme Neu_Theme::BuiltInThemeByName(const std::string& name)
+{
+    const std::string key = lowerName(name);
+    if (key == "materialdark") return MaterialDark();
+    if (key == "light") return Light();
+    if (key == "dark") return Dark();
+    if (key == "blueglass") return BlueGlass();
+    if (key == "win95") return Win95();
+    if (key == "winxp") return WinXP();
+    if (key == "win10") return Win10();
+    if (key == "win11") return Win11();
+    if (key == "classicmotif") return ClassicMotif();
+    if (key == "solarizedlight") return SolarizedLight();
+    if (key == "solarizeddark") return SolarizedDark();
+    if (key == "nord") return Nord();
+    if (key == "dracula") return Dracula();
+    if (key == "gruvboxlight") return GruvboxLight();
+    if (key == "gruvboxdark") return GruvboxDark();
+    if (key == "highcontrastlight") return HighContrastLight();
+    if (key == "highcontrastdark") return HighContrastDark();
+    if (key == "ubuntuaubergine") return UbuntuAubergine();
+    if (key == "kdebreeze") return KDEBreeze();
+    if (key == "macaqua") return MacAqua();
+    if (key == "materiallight") return MaterialLight();
+    if (key == "ocean") return Ocean();
+    if (key == "forest") return Forest();
+    if (key == "rose") return Rose();
+    if (key == "amber") return Amber();
+    if (key == "slate") return Slate();
+    if (key == "candy") return Candy();
+    if (key == "terminalgreen") return TerminalGreen();
+    if (key == "corporateblue") return CorporateBlue();
+    return Light();
 }
 
 bool Neu_IconBmp::load(const std::string& path)
@@ -923,7 +1518,7 @@ void Neu_Control::drawScrollbars(Display*, Drawable drawable, GC, const Neu_Them
     const bool needVertical = virtualSize_.height > r.height;
     const bool needHorizontal = virtualSize_.width > r.width;
     HBRUSH track = CreateSolidBrush(RGB(205, 215, 226));
-    HBRUSH thumb = CreateSolidBrush(rgb(theme.accent));
+    HBRUSH thumb = CreateSolidBrush(rgb(theme.focus));
 
     if (needVertical) {
         const int trackX = r.x + r.width - 10;
@@ -972,19 +1567,21 @@ void Neu_Control::invokeTextChanged()
 void Neu_Control::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme)
 {
     Neu_Rect r = bounds();
-    fillRound(drawable, r, theme.radius, rgb(hover_ ? theme.hover : theme.glass), rgb(focused_ ? theme.accent : theme.border));
-    if (focused_) {
-        HPEN pen = CreatePen(PS_SOLID, 1, rgb(theme.accent));
-        HGDIOBJ oldPen = SelectObject(drawable, pen);
-        HGDIOBJ oldBrush = SelectObject(drawable, GetStockObject(NULL_BRUSH));
-        RoundRect(drawable, r.x + 2, r.y + 2, r.x + r.width - 2, r.y + r.height - 2, theme.radius * 2, theme.radius * 2);
-        SelectObject(drawable, oldBrush);
-        SelectObject(drawable, oldPen);
-        DeleteObject(pen);
+    const std::string cls = className();
+    const bool suppressHoverFill = cls == "Neu_RichTextCode"
+                                   || cls == "Neu_ReadOnlyRichText"
+                                   || cls == "Neu_Placement"
+                                   || cls == "Neu_ScrollWindow"
+                                   || cls == "Neu_ListView"
+                                   || cls == "Neu_TreeView"
+                                   || cls == "Neu_Multilinetextbox";
+    const bool visualHover = hover_ && !suppressHoverFill;
+    fillRound(drawable, r, theme.radius, rgb(visualHover ? theme.highlight : theme.glass), rgb(focused_ ? theme.focus : theme.border));
+    if (focused_ && !suppressHoverFill) {
+        strokeThemedRectWin32(drawable, Neu_Rect{r.x + 2, r.y + 2, r.width - 4, r.height - 4}, std::max(1, theme.radius - 2), rgb(theme.focus));
     }
     drawIconBmp(d, drawable, gc, r.x + 6, r.y + 6, r.height - 12);
 
-    const std::string cls = className();
     const bool baseText = cls == "Neu_Button" || cls == "Neu_Control" || cls == "Neu_MenuItem" || cls == "Neu_FlatButton";
     if (baseText && !text_.empty()) {
         const int textLeft = r.x + (icon_.width() > 0 ? r.height : 10);
@@ -1172,7 +1769,7 @@ void Neu_Textbox::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& th
     if (focused_) {
         const int caretX = textLeft + prefixWidth - textScrollX_;
         if (caretX >= r.x + 6 && caretX <= r.x + r.width - 6) {
-            HPEN pen = CreatePen(PS_SOLID, 1, rgb(theme.accent));
+            HPEN pen = CreatePen(PS_SOLID, 1, rgb(theme.focus));
             HGDIOBJ old = SelectObject(drawable, pen);
             MoveToEx(drawable, caretX, r.y + 8, nullptr);
             LineTo(drawable, caretX, r.y + r.height - 8);
@@ -1339,7 +1936,7 @@ void Neu_Multilinetextbox::draw(Display* d, Drawable drawable, GC gc, const Neu_
         const int caretX = r.x + 10 + measureTextWidth(d, drawable, gc, theme, prefix) - (wordWrap_ ? 0 : scrollX_);
         const int caretY = r.y + 8 + static_cast<int>(lineIndex) * lineHeight - scrollY_;
         if (caretY >= r.y + 6 && caretY < r.y + r.height - 10) {
-            HPEN pen = CreatePen(PS_SOLID, 1, rgb(theme.accent));
+            HPEN pen = CreatePen(PS_SOLID, 1, rgb(theme.focus));
             HGDIOBJ old = SelectObject(drawable, pen);
             MoveToEx(drawable, caretX, caretY - 2, nullptr);
             LineTo(drawable, caretX, caretY + lineHeight - 4);
@@ -1354,6 +1951,32 @@ void Neu_Multilinetextbox::draw(Display* d, Drawable drawable, GC gc, const Neu_
 
 void Neu_Multilinetextbox::handleXEvent(XEvent& ev)
 {
+    if (ev.message == WM_LBUTTONDOWN && contains(ev.x, ev.y)) {
+        Neu_Control::handleXEvent(ev);
+        if (activeScrollDrag_ != 0) {
+            return;
+        }
+
+        Neu_Rect r = bounds();
+        constexpr int lineHeight = 20;
+        const int contentLeft = r.x + 10;
+        const int contentTop = r.y + 8;
+        const int desiredLine = std::max(0, (ev.y - contentTop + scrollY_) / lineHeight);
+        const int localX = ev.x - contentLeft + (wordWrap_ ? 0 : scrollX_);
+        const auto lines = logicalLinesWin32(text_);
+        const int clampedLine = std::min(desiredLine, std::max(0, static_cast<int>(lines.size()) - 1));
+        const size_t start = lineStartOffsetWin32(text_, clampedLine);
+        const size_t end = lineEndOffsetWin32(text_, start);
+
+        HDC hdc = parent_ && parent_->xid() ? GetDC(parent_->xid()) : nullptr;
+        cursor_ = static_cast<size_t>(byteOffsetFromXWin32(hdc, text_, start, end, localX, false));
+        if (hdc) {
+            ReleaseDC(parent_->xid(), hdc);
+        }
+        requestRedraw();
+        return;
+    }
+
     if (focused_ && ev.message == WM_CHAR && (ev.wParam == L'\r' || ev.wParam == L'\n')) {
         const size_t insertAt = std::min(cursor_, text_.size());
         text_.insert(insertAt, 1, '\n');
@@ -1465,12 +2088,133 @@ void Neu_Listbox::handleXEvent(XEvent& ev)
 
 void Neu_ComboBox::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme)
 {
-    Neu_Listbox::draw(d, drawable, gc, theme);
+    Neu_Control::draw(d, drawable, gc, theme);
+    Neu_Rect r = bounds();
+    const int buttonW = 24;
+    const std::string selectedText = selected_ >= 0 && selected_ < static_cast<int>(items_.size())
+                                     ? items_[static_cast<size_t>(selected_)]
+                                     : std::string{};
+    RECT textClip = safeRectWin32(r.x + textOffset_.left + 6,
+                                  r.y + 4,
+                                  r.x + r.width - buttonW - textOffset_.right - 2,
+                                  r.y + r.height - 4);
+    int saved = SaveDC(drawable);
+    IntersectClipRect(drawable, textClip.left, textClip.top, textClip.right, textClip.bottom);
+    const int textWidth = neuMaxIntWin32(1, static_cast<int>(textClip.right - textClip.left) - 2);
+    drawText(d,
+             drawable,
+             gc,
+             theme,
+             truncateTextToWidth(d, drawable, gc, theme, selectedText, textWidth),
+             textClip.left,
+             r.y + std::max(4, (r.height - 16) / 2));
+    RestoreDC(drawable, saved);
+
+    HPEN pen = CreatePen(PS_SOLID, 1, rgb(theme.border));
+    HGDIOBJ oldPen = SelectObject(drawable, pen);
+    const int buttonLeft = r.x + r.width - buttonW;
+    MoveToEx(drawable, buttonLeft, r.y + 4, nullptr);
+    LineTo(drawable, buttonLeft, r.y + r.height - 4);
+    SelectObject(drawable, oldPen);
+    DeleteObject(pen);
+    drawCenteredTriangleWin32(drawable, rgb(theme.text), buttonLeft + buttonW / 2, r.y + r.height / 2, false);
+    drawHintPopup(d, drawable, gc, theme);
 }
 
 void Neu_ComboBox::handleXEvent(XEvent& ev)
 {
-    Neu_Listbox::handleXEvent(ev);
+    Neu_Control::handleXEvent(ev);
+    if (!contains(ev.x, ev.y)) {
+        return;
+    }
+    if (ev.message == WM_MOUSEMOVE) {
+        Neu_Rect r = bounds();
+        hoveredIndex_ = selected_;
+        (void)r;
+        requestRedraw();
+        return;
+    }
+    if (ev.message == WM_LBUTTONUP && !items_.empty()) {
+        if (ctrlDownWin32() && multiSelect_) {
+            if (selected_ >= 0 && selectedIndices_.count(selected_) != 0U) {
+                selectedIndices_.erase(selected_);
+            } else if (selected_ >= 0) {
+                selectedIndices_.insert(selected_);
+            }
+        } else {
+            selected_ = (selected_ + 1) % static_cast<int>(items_.size());
+            selectedIndices_.clear();
+            selectedIndices_.insert(selected_);
+            anchorIndex_ = selected_;
+        }
+        if (callbacks_.onSelectionChanged) {
+            callbacks_.onSelectionChanged(this,
+                                          selected_,
+                                          0,
+                                          items_[static_cast<size_t>(selected_)].c_str(),
+                                          callbacks_.userData);
+        }
+        requestRedraw();
+    }
+}
+
+
+namespace {
+constexpr int kListDefaultColumnWidthWin32 = 120;
+constexpr int kListMinColumnWidthWin32 = 42;
+constexpr int kListRowHeightWin32 = 22;
+
+static Neu_Color darkerWin32(const Neu_Color& color)
+{
+    return Neu_Color{static_cast<uint8_t>(std::max(0, static_cast<int>(color.r) - 32)),
+                     static_cast<uint8_t>(std::max(0, static_cast<int>(color.g) - 32)),
+                     static_cast<uint8_t>(std::max(0, static_cast<int>(color.b) - 32)),
+                     color.a};
+}
+}
+
+void Neu_ListView::setColumnWidths(const std::vector<int>& widths)
+{
+    columnWidths_.clear();
+    columnWidths_.reserve(widths.size());
+    for (int width : widths) {
+        columnWidths_.push_back(std::max(kListMinColumnWidthWin32, width));
+    }
+    requestRedraw();
+}
+
+void Neu_ListView::setColumnWidth(size_t column, int width)
+{
+    if (columnWidths_.size() <= column) {
+        columnWidths_.resize(column + 1, kListDefaultColumnWidthWin32);
+    }
+    columnWidths_[column] = std::max(kListMinColumnWidthWin32, width);
+    requestRedraw();
+}
+
+int Neu_ListView::columnWidth(size_t column) const
+{
+    return effectiveColumnWidth(column, bounds().width);
+}
+
+int Neu_ListView::effectiveColumnWidth(size_t column, int controlWidth) const
+{
+    if (column < columnWidths_.size() && columnWidths_[column] > 0) {
+        return std::max(kListMinColumnWidthWin32, columnWidths_[column]);
+    }
+    if (controlWidth > 0) {
+        return std::max(kListDefaultColumnWidthWin32, std::min(360, (controlWidth - 24) * 6 / 10));
+    }
+    return kListDefaultColumnWidthWin32;
+}
+
+int Neu_ListView::totalColumnWidth(size_t columnCount, int controlWidth) const
+{
+    int total = 0;
+    for (size_t col = 0; col < columnCount; ++col) {
+        total += effectiveColumnWidth(col, controlWidth);
+    }
+    return total;
 }
 
 Neu_TypedValue Neu_ListView::cellValue(size_t r, size_t c) const
@@ -1489,49 +2233,92 @@ void Neu_ListView::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& t
     }
 
     Neu_Rect r = bounds();
-    constexpr int rowHeight = 22;
-    constexpr int columnWidth = 140;
     const int viewportLeft = r.x + 4;
     const int viewportRight = r.x + r.width - 14;
     const int viewportTop = r.y + 4;
     const int viewportBottom = r.y + r.height - 14;
+    const int bodyTop = viewportTop + headerHeight_;
     size_t maxCols = 0;
     for (const auto& row : *model_) {
         maxCols = std::max(maxCols, row.size());
     }
+    const int totalWidth = totalColumnWidth(maxCols, r.width);
+    const int viewportWidth = std::max(1, viewportRight - viewportLeft);
+    const int virtualWidth = totalWidth > viewportWidth ? std::max(r.width + 1, totalWidth + 28) : r.width;
     setAutoScroll(true);
-    setVirtualSize(std::max(r.width, static_cast<int>(maxCols) * columnWidth + 20),
-                   std::max(r.height, static_cast<int>(model_->size()) * rowHeight + 16));
+    setVirtualSize(virtualWidth,
+                   std::max(r.height, headerHeight_ + static_cast<int>(model_->size()) * kListRowHeightWin32 + 16));
 
     int saved = SaveDC(drawable);
     IntersectClipRect(drawable, viewportLeft, viewportTop, viewportRight, viewportBottom);
-    int y = r.y + 20 - scrollY_;
-    for (size_t row = 0; row < model_->size(); ++row, y += rowHeight) {
-        if (y < r.y + 8) {
+
+    RECT header{viewportLeft, viewportTop, viewportRight, bodyTop};
+    HBRUSH headerBrush = CreateSolidBrush(rgb(darkerWin32(theme.glass)));
+    FillRect(drawable, &header, headerBrush);
+    DeleteObject(headerBrush);
+
+    int headerX = r.x + 8 - scrollX_;
+    for (size_t col = 0; col < maxCols; ++col) {
+        const int cw = effectiveColumnWidth(col, r.width);
+        RECT hcell{headerX - 4, viewportTop, headerX + cw - 4, bodyTop};
+        if (hcell.right >= viewportLeft && hcell.left <= viewportRight) {
+            RECT visibleHeader = safeRectWin32(neuMaxIntWin32(static_cast<int>(hcell.left), viewportLeft),
+                                               static_cast<int>(hcell.top),
+                                               neuMinIntWin32(static_cast<int>(hcell.right), viewportRight),
+                                               static_cast<int>(hcell.bottom));
+            FrameRect(drawable, &visibleHeader, reinterpret_cast<HBRUSH>(GetStockObject(GRAY_BRUSH)));
+            int cellSaved = SaveDC(drawable);
+            IntersectClipRect(drawable, visibleHeader.left + 3, visibleHeader.top, visibleHeader.right - 2, visibleHeader.bottom);
+            const std::string title = col == 0 ? "Column 1" : "Column " + std::to_string(col + 1);
+            drawText(d,
+                     drawable,
+                     gc,
+                     theme,
+                     truncateTextToWidth(d, drawable, gc, theme, title, neuMaxIntWin32(1, static_cast<int>(visibleHeader.right - visibleHeader.left) - 8)),
+                     visibleHeader.left + 5,
+                     viewportTop + std::max(4, (headerHeight_ - 16) / 2));
+            RestoreDC(drawable, cellSaved);
+            HPEN pen = CreatePen(PS_SOLID, 1, rgb(theme.focus));
+            HGDIOBJ oldPen = SelectObject(drawable, pen);
+            MoveToEx(drawable, hcell.right, viewportTop + 3, nullptr);
+            LineTo(drawable, hcell.right, bodyTop - 3);
+            SelectObject(drawable, oldPen);
+            DeleteObject(pen);
+        }
+        headerX += cw;
+    }
+
+    IntersectClipRect(drawable, viewportLeft, bodyTop, viewportRight, viewportBottom);
+    int y = bodyTop + kListRowHeightWin32 - 5 - scrollY_;
+    for (size_t row = 0; row < model_->size(); ++row, y += kListRowHeightWin32) {
+        if (y < bodyTop + 8) {
             continue;
         }
-        if (y >= r.y + r.height - 8) {
+        if (y >= viewportBottom) {
             break;
         }
         const bool rowSelected = multiSelect_ ? selectedRows_.count(static_cast<int>(row)) != 0U : static_cast<int>(row) == selectedRow_;
         const bool rowHovered = static_cast<int>(row) == hoveredRow_;
         if (rowSelected || rowHovered) {
-            RECT rr{viewportLeft, y - 18, viewportRight, y + 3};
-            HBRUSH b = CreateSolidBrush(rgb(rowSelected ? theme.pressed : theme.hover));
-            FillRect(drawable, &rr, b);
-            DeleteObject(b);
+            fillRound(drawable,
+                      Neu_Rect{viewportLeft, y - 18, std::max(1, viewportRight - viewportLeft), 21},
+                      std::max(2, theme.radius - 3),
+                      rgb(rowSelected ? theme.pressed : theme.hover),
+                      rgb(rowSelected ? theme.focus : theme.border));
         }
         int x = r.x + 10 - scrollX_;
-        for (size_t col = 0; col < (*model_)[row].size(); ++col, x += columnWidth) {
-            if (x + columnWidth < viewportLeft) {
+        for (size_t col = 0; col < (*model_)[row].size(); ++col) {
+            const int cw = effectiveColumnWidth(col, r.width);
+            if (x + cw < viewportLeft) {
+                x += cw;
                 continue;
             }
             if (x >= viewportRight) {
                 break;
             }
-            RECT cell{x - 3, y - 18, x + columnWidth - 4, y + 3};
+            RECT cell{x - 3, y - 18, x + cw - 4, y + 3};
             const int clippedCellLeft = neuMaxIntWin32(static_cast<int>(cell.left), viewportLeft);
-            const int clippedCellTop = neuMaxIntWin32(static_cast<int>(cell.top), viewportTop);
+            const int clippedCellTop = neuMaxIntWin32(static_cast<int>(cell.top), bodyTop);
             const int clippedCellRight = neuMinIntWin32(static_cast<int>(cell.right), viewportRight);
             const int clippedCellBottom = neuMinIntWin32(static_cast<int>(cell.bottom), viewportBottom);
             RECT visibleCell = safeRectWin32(clippedCellLeft, clippedCellTop, clippedCellRight, clippedCellBottom);
@@ -1554,6 +2341,7 @@ void Neu_ListView::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& t
                 drawText(d, drawable, gc, theme, cellText, drawX, y - 14);
                 RestoreDC(drawable, cellSaved);
             }
+            x += cw;
         }
     }
     RestoreDC(drawable, saved);
@@ -1563,10 +2351,58 @@ void Neu_ListView::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& t
 
 void Neu_ListView::handleXEvent(XEvent& ev)
 {
-    Neu_Control::handleXEvent(ev);
     if (!model_) {
+        Neu_Control::handleXEvent(ev);
         return;
     }
+
+    Neu_Rect r = bounds();
+    const int viewportTop = r.y + 4;
+    const int bodyTop = viewportTop + headerHeight_;
+    const int viewportRight = r.x + r.width - 14;
+    size_t maxCols = 0;
+    for (const auto& rowData : *model_) {
+        maxCols = std::max(maxCols, rowData.size());
+    }
+
+    if (resizingColumn_ >= 0) {
+        if (ev.message == WM_MOUSEMOVE) {
+            setColumnWidth(static_cast<size_t>(resizingColumn_), resizeStartWidth_ + (ev.x - resizeStartX_));
+            return;
+        }
+        if (ev.message == WM_LBUTTONUP) {
+            resizingColumn_ = -1;
+            requestRedraw();
+            return;
+        }
+    }
+
+    if ((ev.message == WM_LBUTTONDOWN || ev.message == WM_MOUSEMOVE)
+        && contains(ev.x, ev.y)
+        && headerResizable_
+        && ev.y >= viewportTop
+        && ev.y <= bodyTop) {
+        int x = r.x + 10 - scrollX_;
+        for (size_t col = 0; col < maxCols; ++col) {
+            const int cw = effectiveColumnWidth(col, r.width);
+            const int boundary = x + cw - 4;
+            if (std::abs(ev.x - boundary) <= 5 && boundary < viewportRight) {
+                if (ev.message == WM_LBUTTONDOWN) {
+                    resizingColumn_ = static_cast<int>(col);
+                    resizeStartX_ = ev.x;
+                    resizeStartWidth_ = cw;
+                }
+                requestRedraw();
+                return;
+            }
+            x += cw;
+        }
+        if (ev.message == WM_LBUTTONDOWN) {
+            return;
+        }
+    }
+
+    Neu_Control::handleXEvent(ev);
     if (!contains(ev.x, ev.y)) {
         if (ev.message == WM_MOUSELEAVE && (hoveredRow_ != -1 || hoveredCol_ != -1)) {
             hoveredRow_ = -1;
@@ -1576,9 +2412,20 @@ void Neu_ListView::handleXEvent(XEvent& ev)
         return;
     }
 
-    Neu_Rect r = bounds();
-    const int row = (ev.y - r.y + scrollY_) / 22;
-    const int col = (ev.x - r.x - 10 + scrollX_) / 140;
+    int row = -1;
+    int col = -1;
+    if (ev.y >= bodyTop) {
+        row = (ev.y - bodyTop + scrollY_) / kListRowHeightWin32;
+        int x = r.x + 10 - scrollX_;
+        for (size_t c = 0; c < maxCols; ++c) {
+            const int cw = effectiveColumnWidth(c, r.width);
+            if (ev.x >= x - 4 && ev.x < x + cw - 4) {
+                col = static_cast<int>(c);
+                break;
+            }
+            x += cw;
+        }
+    }
     const bool validRow = row >= 0 && row < static_cast<int>(model_->size());
     const bool validCol = validRow && col >= 0 && col < static_cast<int>((*model_)[static_cast<size_t>(row)].size());
 
@@ -1742,45 +2589,86 @@ void Neu_TreeView::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& t
     const auto rows = buildTreeRowsWin(model(), collapsedPaths_);
     Neu_Rect r = bounds();
     constexpr int rowHeight = 22;
-    int maxWidth = r.width;
+    constexpr int headerH = 24;
+    int maxWidth = std::max(r.width, treeColumnWidth_ + 24);
     for (const auto& row : rows) {
         const int indent = row.depth * 18;
         const std::string label = (row.hasChildren ? (isPathCollapsed(row.path) ? "+ " : "- ") : "  ") + row.label;
-        maxWidth = std::max(maxWidth, indent + measureTextWidth(d, drawable, gc, theme, label) + 36);
+        maxWidth = std::max(maxWidth, indent + measureTextWidth(d, drawable, gc, theme, label) + 56);
     }
+    treeColumnWidth_ = std::max(96, std::min(std::max(maxWidth, treeColumnWidth_), std::max(180, r.width * 3)));
     setAutoScroll(true);
-    setVirtualSize(std::max(r.width, maxWidth), std::max(r.height, static_cast<int>(rows.size()) * rowHeight + 16));
+    setVirtualSize(std::max(r.width, std::max(maxWidth, treeColumnWidth_ + 28)),
+                   std::max(r.height, headerH + static_cast<int>(rows.size()) * rowHeight + 18));
 
     const int viewportLeft = r.x + 4;
     const int viewportRight = r.x + r.width - 14;
     const int viewportTop = r.y + 4;
     const int viewportBottom = r.y + r.height - 14;
+    const int bodyTop = viewportTop + headerH;
     int saved = SaveDC(drawable);
     IntersectClipRect(drawable, viewportLeft, viewportTop, viewportRight, viewportBottom);
-    int y = r.y + 20 - scrollY_;
+
+    RECT header{viewportLeft, viewportTop, viewportRight, bodyTop};
+    HBRUSH headerBrush = CreateSolidBrush(rgb(darkerWin32(theme.glass)));
+    FillRect(drawable, &header, headerBrush);
+    DeleteObject(headerBrush);
+
+    const int headerX = r.x + 8 - scrollX_;
+    const int headerRight = headerX + treeColumnWidth_;
+    RECT visibleHeader = safeRectWin32(neuMaxIntWin32(headerX - 4, viewportLeft),
+                                       viewportTop,
+                                       neuMinIntWin32(headerRight, viewportRight),
+                                       bodyTop);
+    FrameRect(drawable, &visibleHeader, reinterpret_cast<HBRUSH>(GetStockObject(GRAY_BRUSH)));
+    int headerSaved = SaveDC(drawable);
+    IntersectClipRect(drawable, visibleHeader.left + 4, visibleHeader.top, visibleHeader.right - 2, visibleHeader.bottom);
+    drawText(d,
+             drawable,
+             gc,
+             theme,
+             truncateTextToWidth(d, drawable, gc, theme, "Tree", neuMaxIntWin32(1, static_cast<int>(visibleHeader.right - visibleHeader.left) - 8)),
+             visibleHeader.left + 5,
+             viewportTop + std::max(4, (headerH - 16) / 2));
+    RestoreDC(drawable, headerSaved);
+    HPEN headerPen = CreatePen(PS_SOLID, 1, rgb(theme.focus));
+    HGDIOBJ oldHeaderPen = SelectObject(drawable, headerPen);
+    const int boundaryX = std::min(viewportRight - 1, headerRight - 1);
+    MoveToEx(drawable, boundaryX, viewportTop + 3, nullptr);
+    LineTo(drawable, boundaryX, bodyTop - 3);
+    SelectObject(drawable, oldHeaderPen);
+    DeleteObject(headerPen);
+
+    IntersectClipRect(drawable, viewportLeft, bodyTop, viewportRight, viewportBottom);
+    int y = bodyTop + rowHeight - 5 - scrollY_;
     for (size_t i = 0; i < rows.size(); ++i, y += rowHeight) {
-        if (y < r.y + 8) {
+        if (y < bodyTop + 8) {
             continue;
         }
-        if (y >= r.y + r.height - 8) {
+        if (y >= viewportBottom) {
             break;
         }
         const bool selected = multiSelect_ ? selectedVisibleRows_.count(static_cast<int>(i)) != 0U : static_cast<int>(i) == selectedVisibleRow_;
         const bool hovered = static_cast<int>(i) == hoveredVisibleRow_;
         if (selected || hovered) {
-            RECT rr{viewportLeft, y - 18, viewportRight, y + 3};
-            HBRUSH b = CreateSolidBrush(rgb(selected ? theme.pressed : theme.hover));
-            FillRect(drawable, &rr, b);
-            DeleteObject(b);
+            fillRound(drawable,
+                      Neu_Rect{viewportLeft, y - 18, std::max(1, viewportRight - viewportLeft), 21},
+                      std::max(2, theme.radius - 3),
+                      rgb(selected ? theme.pressed : theme.hover),
+                      rgb(selected ? theme.focus : theme.border));
         }
         const auto& row = rows[i];
         const int indent = row.depth * 18;
         const int textX = r.x + 10 + indent - scrollX_;
+        const int columnRight = r.x + 8 + treeColumnWidth_ - scrollX_;
         const std::string label = (row.hasChildren ? (isPathCollapsed(row.path) ? "+ " : "- ") : "  ") + row.label;
-        RECT textClip = safeRectWin32(neuMaxIntWin32(textX, viewportLeft), y - 18, viewportRight, y + 3);
+        RECT textClip = safeRectWin32(neuMaxIntWin32(textX, viewportLeft),
+                                      y - 18,
+                                      neuMinIntWin32(columnRight, viewportRight),
+                                      y + 3);
         if (textClip.right > textClip.left + 2) {
             int cellSaved = SaveDC(drawable);
-            const int clipTop = neuMaxIntWin32(static_cast<int>(textClip.top), viewportTop);
+            const int clipTop = neuMaxIntWin32(static_cast<int>(textClip.top), bodyTop);
             const int clipBottom = neuMinIntWin32(static_cast<int>(textClip.bottom), viewportBottom);
             IntersectClipRect(drawable, static_cast<int>(textClip.left), clipTop, static_cast<int>(textClip.right), clipBottom);
             const int drawX = neuMaxIntWin32(textX, static_cast<int>(textClip.left) + 2);
@@ -1802,10 +2690,51 @@ void Neu_TreeView::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& t
 
 void Neu_TreeView::handleXEvent(XEvent& ev)
 {
-    Neu_Control::handleXEvent(ev);
     if (!model()) {
+        Neu_Control::handleXEvent(ev);
         return;
     }
+
+    Neu_Rect r = bounds();
+    constexpr int headerH = 24;
+    constexpr int rowHeight = 22;
+    const int viewportLeft = r.x + 4;
+    const int viewportRight = r.x + r.width - 14;
+    const int viewportTop = r.y + 4;
+    const int bodyTop = viewportTop + headerH;
+
+    if (headerResizeActive_) {
+        if (ev.message == WM_MOUSEMOVE) {
+            setTreeColumnWidth(headerResizeStartWidth_ + ev.x - headerResizeStartX_);
+            return;
+        }
+        if (ev.message == WM_LBUTTONUP) {
+            headerResizeActive_ = false;
+            requestRedraw();
+            return;
+        }
+    }
+
+    if ((ev.message == WM_LBUTTONDOWN || ev.message == WM_MOUSEMOVE)
+        && contains(ev.x, ev.y)
+        && ev.y >= viewportTop
+        && ev.y <= bodyTop) {
+        const int boundaryX = r.x + 8 + treeColumnWidth_ - scrollX_;
+        if (std::abs(ev.x - boundaryX) <= 6 && boundaryX < viewportRight) {
+            if (ev.message == WM_LBUTTONDOWN) {
+                headerResizeActive_ = true;
+                headerResizeStartX_ = ev.x;
+                headerResizeStartWidth_ = treeColumnWidth_;
+            }
+            requestRedraw();
+            return;
+        }
+        if (ev.message == WM_LBUTTONDOWN) {
+            return;
+        }
+    }
+
+    Neu_Control::handleXEvent(ev);
     if (!contains(ev.x, ev.y)) {
         if (ev.message == WM_MOUSELEAVE && hoveredVisibleRow_ != -1) {
             hoveredVisibleRow_ = -1;
@@ -1814,8 +2743,11 @@ void Neu_TreeView::handleXEvent(XEvent& ev)
         return;
     }
 
-    Neu_Rect r = bounds();
-    const int rowIndex = (ev.y - r.y + scrollY_) / 22;
+    if (ev.x >= r.x + r.width - 14 || ev.y >= r.y + r.height - 14 || ev.y < bodyTop) {
+        return;
+    }
+
+    const int rowIndex = (ev.y - bodyTop + scrollY_) / rowHeight;
     const auto rows = buildTreeRowsWin(model(), collapsedPaths_);
     const bool validRow = rowIndex >= 0 && rowIndex < static_cast<int>(rows.size());
 
@@ -1933,7 +2865,7 @@ void Neu_ScrollBar::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& 
     const int thumb = std::max(18, track * page_ / std::max(1, total_));
     const int maxValue = std::max(1, total_ - page_);
     const int pos = (track - thumb) * value_ / maxValue;
-    HBRUSH b = CreateSolidBrush(rgb(theme.accent));
+    HBRUSH b = CreateSolidBrush(rgb(theme.focus));
     if (vertical_) {
         RECT th{r.x + 2, r.y + pos, r.x + r.width - 2, r.y + pos + thumb};
         FillRect(drawable, &th, b);
@@ -1963,6 +2895,21 @@ void Neu_ScrollBar::handleXEvent(XEvent& ev)
     Neu_Control::handleXEvent(ev);
 }
 
+void Neu_ScrollWindow::add(std::shared_ptr<Neu_Control> child)
+{
+    if (!child) {
+        return;
+    }
+    Neu_Layout childLayout = child->layout();
+    const Neu_Rect r = bounds();
+    if (childLayout.left >= r.x && childLayout.top >= r.y) {
+        childLayout.left -= r.x;
+        childLayout.top -= r.y;
+        child->setLayout(childLayout);
+    }
+    Neu_Placement::add(child);
+}
+
 void Neu_ScrollWindow::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme)
 {
     Neu_Control::draw(d, drawable, gc, theme);
@@ -1971,16 +2918,19 @@ void Neu_ScrollWindow::draw(Display* d, Drawable drawable, GC gc, const Neu_Them
     const int viewportTop = r.y + 4;
     const int viewportRight = r.x + r.width - 14;
     const int viewportBottom = r.y + r.height - 14;
+    const int viewportWidth = std::max(1, viewportRight - viewportLeft);
+    const int viewportHeight = std::max(1, viewportBottom - viewportTop);
+
     int saved = SaveDC(drawable);
     IntersectClipRect(drawable, viewportLeft, viewportTop, viewportRight, viewportBottom);
-    int maxRight = r.width;
-    int maxBottom = r.height;
+    int maxRight = viewportWidth;
+    int maxBottom = viewportHeight;
     for (const auto& child : children()) {
         if (child && child->visible()) {
             Neu_Layout original = child->layout();
             Neu_Layout shifted = original;
-            shifted.left -= scrollX();
-            shifted.top -= scrollY();
+            shifted.left = viewportLeft + original.left - scrollX();
+            shifted.top = viewportTop + original.top - scrollY();
             child->setLayout(shifted);
             Neu_Rect cr = child->bounds();
             const bool intersects = cr.x + cr.width >= viewportLeft
@@ -1992,10 +2942,9 @@ void Neu_ScrollWindow::draw(Display* d, Drawable drawable, GC gc, const Neu_Them
                 IntersectClipRect(drawable, viewportLeft, viewportTop, viewportRight, viewportBottom);
                 child->draw(d, drawable, gc, theme);
                 RestoreDC(drawable, childSaved);
-                IntersectClipRect(drawable, viewportLeft, viewportTop, viewportRight, viewportBottom);
             }
-            maxRight = std::max(maxRight, original.left - r.x + original.width + 20);
-            maxBottom = std::max(maxBottom, original.top - r.y + original.height + 20);
+            maxRight = std::max(maxRight, original.left + original.width + 20);
+            maxBottom = std::max(maxBottom, original.top + original.height + 20);
             child->setLayout(original);
         }
     }
@@ -2014,10 +2963,20 @@ void Neu_ScrollWindow::handleXEvent(XEvent& ev)
         return;
     }
 
+    Neu_Rect r = bounds();
+    const int viewportLeft = r.x + 4;
+    const int viewportTop = r.y + 4;
+    const int viewportRight = r.x + r.width - 14;
+    const int viewportBottom = r.y + r.height - 14;
+    if ((ev.message == WM_MOUSEMOVE || ev.message == WM_LBUTTONDOWN || ev.message == WM_LBUTTONUP)
+        && (ev.x < viewportLeft || ev.x > viewportRight || ev.y < viewportTop || ev.y > viewportBottom)) {
+        return;
+    }
+
     XEvent adjusted = ev;
     if (ev.message == WM_MOUSEMOVE || ev.message == WM_LBUTTONDOWN || ev.message == WM_LBUTTONUP) {
-        adjusted.x += scrollX();
-        adjusted.y += scrollY();
+        adjusted.x = ev.x - viewportLeft + scrollX();
+        adjusted.y = ev.y - viewportTop + scrollY();
         for (auto it = children().rbegin(); it != children().rend(); ++it) {
             auto& child = *it;
             if (child && child->visible() && child->enabled() && child->contains(adjusted.x, adjusted.y)) {
@@ -2031,6 +2990,7 @@ void Neu_ScrollWindow::handleXEvent(XEvent& ev)
 void Neu_Label::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme)
 {
     Neu_Rect r = bounds();
+    const auto off = textOffset_;
     if (borderVisible_) {
         HPEN pen = CreatePen(PS_SOLID, 1, rgb(theme.border));
         HGDIOBJ oldPen = SelectObject(drawable, pen);
@@ -2041,22 +3001,30 @@ void Neu_Label::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& them
         DeleteObject(pen);
     }
 
-    const int iconSpace = icon().width() > 0 ? 24 : 0;
-    if (icon().width() > 0) {
-        drawIconBmp(d, drawable, gc, r.x + 2, r.y + std::max(0, (r.height - 16) / 2), 16);
-    }
-    const int textLeft = r.x + iconSpace + 2;
-    const int textRight = r.x + r.width - 2;
-    const int width = std::max(1, textRight - textLeft);
+    const int iconSize = icon().width() > 0 ? 16 : 0;
+    const int iconSpace = iconSize > 0 ? iconSize + 6 : 0;
+    const int contentLeft = r.x + off.left;
+    const int contentTop = r.y + off.top;
+    const int contentRight = r.x + r.width - off.right;
+    const int contentBottom = r.y + r.height - off.bottom;
+    const int textLeft = contentLeft + iconSpace;
+    const int width = std::max(1, contentRight - textLeft);
+    const int contentHeight = std::max(1, contentBottom - contentTop);
+
     int saved = SaveDC(drawable);
-    IntersectClipRect(drawable, textLeft, r.y, textRight, r.y + r.height);
+    IntersectClipRect(drawable, r.x, r.y, r.x + r.width, r.y + r.height);
+    if (iconSize > 0) {
+        drawIconBmp(d, drawable, gc, contentLeft, contentTop + std::max(0, (contentHeight - iconSize) / 2), iconSize);
+    }
+    IntersectClipRect(drawable, textLeft, contentTop, contentRight, contentBottom);
+
     int x = textLeft;
     if (!richTextFragments().empty()) {
         for (const auto& f : richTextFragments()) {
-            if (x >= textRight) {
+            if (x >= contentRight) {
                 break;
             }
-            const int remaining = std::max(1, textRight - x);
+            const int remaining = std::max(1, contentRight - x);
             const std::string visible = truncateTextToWidth(d, drawable, gc, theme, f.text, remaining);
             drawTextColored(d,
                             drawable,
@@ -2064,7 +3032,7 @@ void Neu_Label::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& them
                             theme,
                             visible,
                             x,
-                            r.y + std::max(4, (r.height - 16) / 2),
+                            contentTop + std::max(1, (contentHeight - 16) / 2),
                             f.useFontColor ? f.fontColor : theme.text,
                             f.bold,
                             f.italic,
@@ -2077,9 +3045,9 @@ void Neu_Label::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& them
         }
     } else if (wordWrap_) {
         auto lines = wrapTextToWidth(d, drawable, gc, theme, text(), width);
-        int y = r.y + 2;
+        int y = contentTop + 2;
         for (const auto& line : lines) {
-            if (y > r.y + r.height - 12) {
+            if (y > contentBottom - 12) {
                 break;
             }
             const std::string visible = truncateTextToWidth(d, drawable, gc, theme, line, width);
@@ -2088,7 +3056,7 @@ void Neu_Label::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& them
         }
     } else {
         const std::string visible = truncateTextToWidth(d, drawable, gc, theme, text(), width);
-        drawText(d, drawable, gc, theme, visible, alignedTextX(d, drawable, gc, theme, visible, textLeft, width), r.y + std::max(4, (r.height - 16) / 2));
+        drawText(d, drawable, gc, theme, visible, alignedTextX(d, drawable, gc, theme, visible, textLeft, width), contentTop + std::max(1, (contentHeight - 16) / 2));
     }
     RestoreDC(drawable, saved);
     drawHintPopup(d, drawable, gc, theme);
@@ -2097,6 +3065,7 @@ void Neu_Label::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& them
 void Neu_MultilineLabel::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme)
 {
     Neu_Rect r = bounds();
+    const auto off = textOffset_;
     if (borderVisible_) {
         HPEN pen = CreatePen(PS_SOLID, 1, rgb(theme.border));
         HGDIOBJ oldPen = SelectObject(drawable, pen);
@@ -2106,32 +3075,37 @@ void Neu_MultilineLabel::draw(Display* d, Drawable drawable, GC gc, const Neu_Th
         SelectObject(drawable, oldPen);
         DeleteObject(pen);
     }
-    const int iconSpace = icon().width() > 0 ? 26 : 0;
-    if (icon().width() > 0) {
-        drawIconBmp(d, drawable, gc, r.x + 2, r.y + 4, 20);
-    }
-    const int textLeft = r.x + iconSpace + 2;
-    const int textRight = r.x + r.width - 12;
-    const int contentWidth = std::max(1, textRight - textLeft);
+    const int iconSize = icon().width() > 0 ? 20 : 0;
+    const int iconSpace = iconSize > 0 ? iconSize + 6 : 0;
+    const int contentLeft = r.x + off.left;
+    const int contentTop = r.y + off.top;
+    const int contentRight = r.x + r.width - off.right - 10;
+    const int contentBottom = r.y + r.height - off.bottom;
+    const int textLeft = contentLeft + iconSpace;
+    const int contentWidth = std::max(1, contentRight - textLeft);
     int saved = SaveDC(drawable);
-    IntersectClipRect(drawable, textLeft, r.y, textRight, r.y + r.height);
+    IntersectClipRect(drawable, r.x, r.y, r.x + r.width, r.y + r.height);
+    if (iconSize > 0) {
+        drawIconBmp(d, drawable, gc, contentLeft, contentTop + 2, iconSize);
+    }
+    IntersectClipRect(drawable, textLeft, contentTop, contentRight, contentBottom);
     std::vector<std::string> lines;
     auto logical = logicalLinesWin32(text());
     for (const auto& base : logical) {
         auto wrapped = wrapTextToWidth(d, drawable, gc, theme, base, contentWidth);
         lines.insert(lines.end(), wrapped.begin(), wrapped.end());
     }
-    int y = r.y + 2 - scrollY();
+    int y = contentTop + 2 - scrollY();
     for (const auto& line : lines) {
-        if (y >= r.y && y < r.y + r.height - 12) {
+        if (y >= contentTop && y < contentBottom - 12) {
             const std::string visible = truncateTextToWidth(d, drawable, gc, theme, line, contentWidth);
-            drawText(d, drawable, gc, theme, visible, textLeft, y);
+            drawText(d, drawable, gc, theme, visible, alignedTextX(d, drawable, gc, theme, visible, textLeft, contentWidth), y);
         }
         y += 18;
     }
     RestoreDC(drawable, saved);
     setAutoScroll(true);
-    setVirtualSize(r.width, std::max(r.height, static_cast<int>(lines.size()) * 18 + 12));
+    setVirtualSize(r.width, std::max(r.height, static_cast<int>(lines.size()) * 18 + off.top + off.bottom + 12));
     drawScrollbars(d, drawable, gc, theme);
     drawHintPopup(d, drawable, gc, theme);
 }
@@ -2240,7 +3214,7 @@ void Neu_RichTextCode::draw(Display* d, Drawable drawable, GC gc, const Neu_Them
         const int caretX = contentLeft + measureTextWidth(d, drawable, gc, theme, prefix, false, false, true) - (wordWrap_ ? 0 : scrollX());
         const int caretY = contentTop + 2 + static_cast<int>(lineIndex) * 20 - scrollY();
         if (caretY >= contentTop && caretY < contentBottom) {
-            HPEN pen = CreatePen(PS_SOLID, 1, rgb(theme.accent));
+            HPEN pen = CreatePen(PS_SOLID, 1, rgb(theme.focus));
             HGDIOBJ old = SelectObject(drawable, pen);
             MoveToEx(drawable, caretX, caretY - 2, nullptr);
             LineTo(drawable, caretX, caretY + 16);
@@ -2258,11 +3232,56 @@ void Neu_RichTextCode::draw(Display* d, Drawable drawable, GC gc, const Neu_Them
 
 void Neu_RichTextCode::handleXEvent(XEvent& ev)
 {
-    if (!readOnly_) {
-        Neu_Multilinetextbox::handleXEvent(ev);
-    } else {
+    if (readOnly_) {
         Neu_Control::handleXEvent(ev);
+        return;
     }
+
+    if (ev.message == WM_LBUTTONDOWN && contains(ev.x, ev.y)) {
+        Neu_Control::handleXEvent(ev);
+        if (activeScrollDrag_ != 0) {
+            return;
+        }
+        Neu_Rect r = bounds();
+        const int toolbarH = toolbarVisible_ ? 34 : 0;
+        constexpr int lineHeight = 20;
+        const int contentLeft = r.x + 56;
+        const int contentTop = r.y + toolbarH + 4;
+        const int contentBottom = r.y + r.height - 14;
+        if (ev.y >= contentTop && ev.y <= contentBottom) {
+            const int desiredLine = std::max(0, (ev.y - (contentTop + 2) + scrollY_) / lineHeight);
+            const auto lines = logicalLinesWin32(text_);
+            const int clampedLine = std::min(desiredLine, std::max(0, static_cast<int>(lines.size()) - 1));
+            const size_t start = lineStartOffsetWin32(text_, clampedLine);
+            const size_t end = lineEndOffsetWin32(text_, start);
+            const int localX = ev.x - contentLeft + (wordWrap_ ? 0 : scrollX_);
+            HDC hdc = parent_ && parent_->xid() ? GetDC(parent_->xid()) : nullptr;
+            cursor_ = static_cast<size_t>(byteOffsetFromXWin32(hdc, text_, start, end, localX, true));
+            if (hdc) {
+                ReleaseDC(parent_->xid(), hdc);
+            }
+            requestRedraw();
+            return;
+        }
+    }
+
+    if (focused_ && ev.message == WM_CHAR && ev.wParam == L'\b') {
+        const size_t before = cursor_;
+        Neu_Multilinetextbox::handleXEvent(ev);
+        if (cursor_ != before) {
+            // Re-normalize caret after deleting a newline so the visual x/y uses the new logical line.
+            if (cursor_ < text_.size() && text_[cursor_] == '\r') {
+                text_.erase(cursor_, 1);
+            }
+            if (scrollX_ < 0) {
+                scrollX_ = 0;
+            }
+            requestRedraw();
+        }
+        return;
+    }
+
+    Neu_Multilinetextbox::handleXEvent(ev);
 }
 
 void Neu_ProgressSquare::setProgress(float progress)
@@ -2393,13 +3412,503 @@ void Neu_ReadOnlyRichText::addMultilineLabel(const std::string& text)
     setContentSize(layout().width, contentCursorY_ + 50);
 }
 
+namespace {
+static std::string truncateApproxWin(const std::string& text, int width)
+{
+    const int maxChars = std::max(0, width / 7);
+    if (static_cast<int>(text.size()) <= maxChars) {
+        return text;
+    }
+    if (maxChars <= 3) {
+        return text.substr(0, static_cast<size_t>(maxChars));
+    }
+    return text.substr(0, static_cast<size_t>(maxChars - 3)) + "...";
+}
+
+static void drawPlainTextWin(HDC hdc,
+                             const Neu_Theme& theme,
+                             const std::string& text,
+                             int left,
+                             int top,
+                             int right,
+                             int bottom,
+                             COLORREF color,
+                             bool underline = false)
+{
+    RECT clip{left, top, std::max(left + 1, right), std::max(top + 1, bottom)};
+    int saved = SaveDC(hdc);
+    IntersectClipRect(hdc, clip.left, clip.top, clip.right, clip.bottom);
+    SetBkMode(hdc, TRANSPARENT);
+    SetTextColor(hdc, color);
+    HFONT font = createTextFont(false, false, underline, false, false, 0);
+    HGDIOBJ oldFont = SelectObject(hdc, font ? font : uiFont());
+    const std::string visible = truncateApproxWin(text, clip.right - clip.left);
+    std::wstring w = toWide(visible);
+    ExtTextOutW(hdc, clip.left, clip.top, ETO_CLIPPED, &clip, w.c_str(), static_cast<UINT>(w.size()), nullptr);
+    SelectObject(hdc, oldFont);
+    if (font) {
+        DeleteObject(font);
+    }
+    (void)theme;
+    RestoreDC(hdc, saved);
+}
+}
+
+void Neu_CheckBox::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme)
+{
+    (void)d;
+    (void)gc;
+    Neu_Rect r = bounds();
+    RECT bg{r.x, r.y, r.x + r.width, r.y + r.height};
+    HBRUSH b = CreateSolidBrush(rgb(hover_ ? theme.highlight : theme.glass));
+    FillRect(drawable, &bg, b);
+    DeleteObject(b);
+
+    const int box = std::max(12, std::min(18, r.height - 8));
+    RECT cb{r.x + 4, r.y + (r.height - box) / 2, r.x + 4 + box, r.y + (r.height - box) / 2 + box};
+    drawSupersampledRoundRectWin32(drawable,
+                                   cb,
+                                   4,
+                                   rgb(hover_ ? theme.hover : theme.background),
+                                   rgb(theme.glass),
+                                   rgb(focused_ ? theme.focus : theme.border),
+                                   true);
+    if (checked_) {
+        HPEN pen = CreatePen(PS_SOLID, 2, rgb(theme.focus));
+        HGDIOBJ old = SelectObject(drawable, pen);
+        SetBkMode(drawable, TRANSPARENT);
+        MoveToEx(drawable, cb.left + 3, cb.top + box / 2, nullptr);
+        LineTo(drawable, cb.left + box / 2, cb.bottom - 3);
+        LineTo(drawable, cb.right - 3, cb.top + 3);
+        MoveToEx(drawable, cb.left + 3, cb.top + box / 2 + 1, nullptr);
+        LineTo(drawable, cb.left + box / 2, cb.bottom - 2);
+        SelectObject(drawable, old);
+        DeleteObject(pen);
+    }
+    const int left = cb.right + 7 + textOffset_.left;
+    drawPlainTextWin(drawable,
+                     theme,
+                     text_,
+                     left,
+                     r.y + textOffset_.top + std::max(0, (r.height - 16) / 2),
+                     r.x + r.width - textOffset_.right,
+                     r.y + r.height - textOffset_.bottom,
+                     rgb(theme.text));
+    drawHintPopup(d, drawable, gc, theme);
+}
+
+void Neu_CheckBox::handleXEvent(XEvent& ev)
+{
+    Neu_Control::handleXEvent(ev);
+    if (ev.message == WM_LBUTTONUP && contains(ev.x, ev.y)) {
+        checked_ = !checked_;
+        invokeClick();
+        requestRedraw();
+    }
+}
+
+void Neu_RadioButton::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme)
+{
+    (void)d;
+    (void)gc;
+    Neu_Rect r = bounds();
+    RECT bg{r.x, r.y, r.x + r.width, r.y + r.height};
+    HBRUSH b = CreateSolidBrush(rgb(hover_ ? theme.highlight : theme.glass));
+    FillRect(drawable, &bg, b);
+    DeleteObject(b);
+    const int box = std::max(12, std::min(18, r.height - 8));
+    const int x = r.x + 4;
+    const int y = r.y + (r.height - box) / 2;
+    RECT outer{x, y, x + box, y + box};
+    drawSupersampledEllipseWin32(drawable,
+                                 outer,
+                                 rgb(hover_ ? theme.hover : theme.background),
+                                 rgb(theme.glass),
+                                 rgb(focused_ ? theme.focus : theme.border),
+                                 true);
+    if (checked_) {
+        RECT dot{x + 4, y + 4, x + box - 4, y + box - 4};
+        drawSupersampledEllipseWin32(drawable, dot, rgb(theme.glass), rgb(theme.focus), rgb(theme.focus), true);
+    }
+    const int left = x + box + 7 + textOffset_.left;
+    drawPlainTextWin(drawable,
+                     theme,
+                     text_,
+                     left,
+                     r.y + textOffset_.top + std::max(0, (r.height - 16) / 2),
+                     r.x + r.width - textOffset_.right,
+                     r.y + r.height - textOffset_.bottom,
+                     rgb(theme.text));
+    drawHintPopup(d, drawable, gc, theme);
+}
+
+
+void Neu_ToggleButton::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme)
+{
+    (void)d;
+    (void)gc;
+    Neu_Rect r = bounds();
+    fillRound(drawable,
+              r,
+              theme.radius,
+              rgb(checked_ ? theme.pressed : (hover_ ? theme.hover : theme.glass)),
+              rgb(focused_ ? theme.focus : theme.border));
+
+    const int left = r.x + textOffset_.left;
+    const int top = r.y + textOffset_.top;
+    const int right = r.x + r.width - textOffset_.right;
+    const int bottom = r.y + r.height - textOffset_.bottom;
+    const int width = std::max(1, right - left);
+    const int height = std::max(1, bottom - top);
+
+    const int saved = SaveDC(drawable);
+    IntersectClipRect(drawable, left, top, right, bottom);
+    const std::string label = text_.empty() ? (checked_ ? "On" : "Off") : text_;
+    const std::string visible = truncateTextToWidth(d, drawable, gc, theme, label, width);
+    drawText(d,
+             drawable,
+             gc,
+             theme,
+             visible,
+             alignedTextX(d, drawable, gc, theme, visible, left, width),
+             top + std::max(1, (height - 16) / 2));
+    RestoreDC(drawable, saved);
+    drawHintPopup(d, drawable, gc, theme);
+}
+
+void Neu_ProgressBar::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme)
+{
+    Neu_Control::draw(d, drawable, gc, theme);
+    Neu_Rect r = bounds();
+    RECT inner{r.x + 5, r.y + 5, r.x + r.width - 5, r.y + r.height - 5};
+    const int innerW = std::max(1, static_cast<int>(inner.right - inner.left));
+    const int innerH = std::max(1, static_cast<int>(inner.bottom - inner.top));
+    const int fillW = std::max(0, static_cast<int>(innerW * progress_));
+    if (fillW > 0) {
+        fillRound(drawable,
+                  Neu_Rect{inner.left, inner.top, fillW, innerH},
+                  std::max(2, theme.radius - 4),
+                  rgb(theme.focus),
+                  rgb(theme.focus));
+    }
+    drawPlainTextWin(drawable, theme, text_.empty() ? std::to_string(static_cast<int>(progress_ * 100.0f)) + "%" : text_, inner.left + 4, inner.top + 2, inner.right - 4, inner.bottom - 2, rgb(theme.text));
+    drawHintPopup(d, drawable, gc, theme);
+}
+
+void Neu_Slider::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme)
+{
+    Neu_Control::draw(d, drawable, gc, theme);
+    Neu_Rect r = bounds();
+    const float t = (max_ == min_) ? 0.0f : static_cast<float>(value_ - min_) / static_cast<float>(max_ - min_);
+    HPEN track = CreatePen(PS_SOLID, 2, rgb(theme.border));
+    HGDIOBJ old = SelectObject(drawable, track);
+    if (vertical_) {
+        const int x = r.x + r.width / 2;
+        MoveToEx(drawable, x, r.y + 8, nullptr);
+        LineTo(drawable, x, r.y + r.height - 8);
+        SelectObject(drawable, old);
+        DeleteObject(track);
+        HBRUSH knob = CreateSolidBrush(rgb(theme.focus));
+        HGDIOBJ oldBrush = SelectObject(drawable, knob);
+        const int y = r.y + 8 + static_cast<int>((r.height - 16) * (1.0f - t));
+        Ellipse(drawable, x - 7, y - 7, x + 7, y + 7);
+        SelectObject(drawable, oldBrush);
+        DeleteObject(knob);
+    } else {
+        const int y = r.y + r.height / 2;
+        MoveToEx(drawable, r.x + 8, y, nullptr);
+        LineTo(drawable, r.x + r.width - 8, y);
+        SelectObject(drawable, old);
+        DeleteObject(track);
+        HBRUSH knob = CreateSolidBrush(rgb(theme.focus));
+        HGDIOBJ oldBrush = SelectObject(drawable, knob);
+        const int x = r.x + 8 + static_cast<int>((r.width - 16) * t);
+        Ellipse(drawable, x - 7, y - 7, x + 7, y + 7);
+        SelectObject(drawable, oldBrush);
+        DeleteObject(knob);
+    }
+    drawHintPopup(d, drawable, gc, theme);
+}
+
+void Neu_Slider::handleXEvent(XEvent& ev)
+{
+    Neu_Control::handleXEvent(ev);
+    if (ev.message == WM_LBUTTONDOWN && contains(ev.x, ev.y)) {
+        dragging_ = true;
+    }
+    if (ev.message == WM_LBUTTONUP) {
+        dragging_ = false;
+    }
+    if ((dragging_ && ev.message == WM_MOUSEMOVE) || (ev.message == WM_LBUTTONDOWN && contains(ev.x, ev.y))) {
+        Neu_Rect r = bounds();
+        float t = vertical_ ? 1.0f - static_cast<float>(ev.y - r.y - 8) / static_cast<float>(std::max(1, r.height - 16))
+                            : static_cast<float>(ev.x - r.x - 8) / static_cast<float>(std::max(1, r.width - 16));
+        t = std::max(0.0f, std::min(1.0f, t));
+        setValue(min_ + static_cast<int>((max_ - min_) * t + 0.5f));
+    }
+}
+
+void Neu_Spinner::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme)
+{
+    Neu_Control::draw(d, drawable, gc, theme);
+    Neu_Rect r = bounds();
+    const int buttonW = 22;
+    const int buttonLeft = r.x + r.width - buttonW;
+    drawPlainTextWin(drawable, theme, text_, r.x + 8 + textOffset_.left, r.y + 4 + textOffset_.top, buttonLeft - textOffset_.right, r.y + r.height - 4 - textOffset_.bottom, rgb(theme.text));
+    HPEN pen = CreatePen(PS_SOLID, 1, rgb(theme.border));
+    HGDIOBJ oldPen = SelectObject(drawable, pen);
+    MoveToEx(drawable, buttonLeft, r.y + 3, nullptr);
+    LineTo(drawable, buttonLeft, r.y + r.height - 3);
+    SelectObject(drawable, oldPen);
+    DeleteObject(pen);
+    const int arrowX = buttonLeft + buttonW / 2;
+    drawArrowWin32(drawable, arrowX, r.y + std::max(8, r.height / 4), true, rgb(theme.text));
+    drawArrowWin32(drawable, arrowX, r.y + r.height - std::max(8, r.height / 4), false, rgb(theme.text));
+    drawHintPopup(d, drawable, gc, theme);
+}
+
+void Neu_Spinner::handleXEvent(XEvent& ev)
+{
+    Neu_Control::handleXEvent(ev);
+    if (ev.message == WM_LBUTTONUP && contains(ev.x, ev.y)) {
+        Neu_Rect r = bounds();
+        if (ev.x >= r.x + r.width - 24) {
+            setValue(value_ + (ev.y < r.y + r.height / 2 ? 1 : -1));
+            invokeTextChanged();
+            invokeClick();
+        }
+    }
+}
+
+void Neu_GroupBox::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme)
+{
+    Neu_Rect r = bounds();
+    HPEN pen = CreatePen(PS_SOLID, 1, rgb(theme.border));
+    HGDIOBJ oldPen = SelectObject(drawable, pen);
+    HGDIOBJ oldBrush = SelectObject(drawable, GetStockObject(NULL_BRUSH));
+    Rectangle(drawable, r.x, r.y + 8, r.x + r.width, r.y + r.height);
+    SelectObject(drawable, oldBrush);
+    SelectObject(drawable, oldPen);
+    DeleteObject(pen);
+    drawText(d, drawable, gc, theme, text_, r.x + 10 + textOffset_.left, r.y + 2 + textOffset_.top);
+    for (auto& c : children()) {
+        if (c && c->visible()) {
+            c->draw(d, drawable, gc, theme);
+        }
+    }
+    drawHintPopup(d, drawable, gc, theme);
+}
+
+void Neu_Separator::draw(Display*, Drawable drawable, GC, const Neu_Theme& theme)
+{
+    Neu_Rect r = bounds();
+    HPEN pen = CreatePen(PS_SOLID, 1, rgb(theme.border));
+    HGDIOBJ old = SelectObject(drawable, pen);
+    if (vertical_) {
+        const int x = r.x + r.width / 2;
+        MoveToEx(drawable, x, r.y, nullptr);
+        LineTo(drawable, x, r.y + r.height);
+    } else {
+        const int y = r.y + r.height / 2;
+        MoveToEx(drawable, r.x, y, nullptr);
+        LineTo(drawable, r.x + r.width, y);
+    }
+    SelectObject(drawable, old);
+    DeleteObject(pen);
+}
+
+void Neu_LinkLabel::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme)
+{
+    (void)d;
+    (void)gc;
+    Neu_Rect r = bounds();
+    drawPlainTextWin(drawable, theme, text_, r.x + textOffset_.left, r.y + textOffset_.top + std::max(0, (r.height - 16) / 2), r.x + r.width - textOffset_.right, r.y + r.height - textOffset_.bottom, rgb(theme.focus), true);
+    drawHintPopup(d, drawable, gc, theme);
+}
+
+void Neu_LinkLabel::handleXEvent(XEvent& ev)
+{
+    Neu_Control::handleXEvent(ev);
+    if (ev.message == WM_LBUTTONUP && contains(ev.x, ev.y)) {
+        invokeClick();
+    }
+}
+
+void Neu_ToolBar::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme)
+{
+    Neu_Control::draw(d, drawable, gc, theme);
+    for (auto& c : children()) {
+        if (c && c->visible()) {
+            c->draw(d, drawable, gc, theme);
+        }
+    }
+    drawHintPopup(d, drawable, gc, theme);
+}
+
+int Neu_TabView::addTab(const std::string& title, std::shared_ptr<Neu_Placement> page)
+{
+    titles_.push_back(title);
+    pages_.push_back(page);
+    if (page) {
+        page->setParent(parent_);
+    }
+    return static_cast<int>(titles_.size()) - 1;
+}
+
+void Neu_TabView::setParent(Neu_Window* parent)
+{
+    Neu_Control::setParent(parent);
+    for (auto& page : pages_) {
+        if (page) {
+            page->setParent(parent);
+        }
+    }
+}
+
+void Neu_TabView::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme)
+{
+    Neu_Control::draw(d, drawable, gc, theme);
+    Neu_Rect r = bounds();
+    const int tabH = 26;
+    int x = r.x + 6;
+    for (size_t i = 0; i < titles_.size(); ++i) {
+        const int w = std::max(72, static_cast<int>(titles_[i].size()) * 8 + 18);
+        RECT tr{x, r.y + 4, x + w, r.y + 4 + tabH};
+        HBRUSH b = CreateSolidBrush(rgb(static_cast<int>(i) == selectedTab_ ? theme.pressed : theme.hover));
+        FillRect(drawable, &tr, b);
+        DeleteObject(b);
+        FrameRect(drawable, &tr, reinterpret_cast<HBRUSH>(GetStockObject(GRAY_BRUSH)));
+        drawPlainTextWin(drawable, theme, titles_[i], x + 8, r.y + 8, x + w - 4, r.y + 4 + tabH, rgb(theme.text));
+        x += w + 2;
+    }
+    if (selectedTab_ >= 0 && selectedTab_ < static_cast<int>(pages_.size()) && pages_[static_cast<size_t>(selectedTab_)]) {
+        pages_[static_cast<size_t>(selectedTab_)]->draw(d, drawable, gc, theme);
+    }
+    drawHintPopup(d, drawable, gc, theme);
+}
+
+void Neu_TabView::handleXEvent(XEvent& ev)
+{
+    Neu_Rect r = bounds();
+    if ((ev.message == WM_LBUTTONDOWN || ev.message == WM_LBUTTONUP) && contains(ev.x, ev.y)) {
+        int x = r.x + 6;
+        for (size_t i = 0; i < titles_.size(); ++i) {
+            const int w = std::max(72, static_cast<int>(titles_[i].size()) * 8 + 18);
+            if (ev.y >= r.y + 4 && ev.y <= r.y + 30 && ev.x >= x && ev.x <= x + w) {
+                selectedTab_ = static_cast<int>(i);
+                requestRedraw();
+                return;
+            }
+            x += w + 2;
+        }
+    }
+    if (selectedTab_ >= 0 && selectedTab_ < static_cast<int>(pages_.size()) && pages_[static_cast<size_t>(selectedTab_)]) {
+        pages_[static_cast<size_t>(selectedTab_)]->handleXEvent(ev);
+        return;
+    }
+    Neu_Control::handleXEvent(ev);
+}
+
+void Neu_Splitter::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme)
+{
+    Neu_Control::draw(d, drawable, gc, theme);
+    Neu_Rect r = bounds();
+    const int split = vertical_ ? std::max(24, std::min(splitPosition_, r.width - 24))
+                                : std::max(24, std::min(splitPosition_, r.height - 24));
+    const int splitAbs = vertical_ ? r.x + split : r.y + split;
+
+    for (auto& child : children()) {
+        if (!child || !child->visible()) {
+            continue;
+        }
+        Neu_Rect cr = child->bounds();
+        int saved = SaveDC(drawable);
+        if (vertical_) {
+            const bool leftPane = cr.x + cr.width / 2 < splitAbs;
+            const int clipLeft = leftPane ? r.x + 2 : splitAbs + 2;
+            const int clipRight = leftPane ? splitAbs - 2 : r.x + r.width - 2;
+            if (clipRight > clipLeft) {
+                IntersectClipRect(drawable, clipLeft, r.y + 2, clipRight, r.y + r.height - 2);
+                child->draw(d, drawable, gc, theme);
+            }
+        } else {
+            const bool topPane = cr.y + cr.height / 2 < splitAbs;
+            const int clipTop = topPane ? r.y + 2 : splitAbs + 2;
+            const int clipBottom = topPane ? splitAbs - 2 : r.y + r.height - 2;
+            if (clipBottom > clipTop) {
+                IntersectClipRect(drawable, r.x + 2, clipTop, r.x + r.width - 2, clipBottom);
+                child->draw(d, drawable, gc, theme);
+            }
+        }
+        RestoreDC(drawable, saved);
+    }
+
+    HBRUSH b = CreateSolidBrush(rgb(theme.focus));
+    if (vertical_) {
+        RECT sr{splitAbs - 2, r.y + 4, splitAbs + 2, r.y + r.height - 4};
+        FillRect(drawable, &sr, b);
+    } else {
+        RECT sr{r.x + 4, splitAbs - 2, r.x + r.width - 4, splitAbs + 2};
+        FillRect(drawable, &sr, b);
+    }
+    DeleteObject(b);
+    drawHintPopup(d, drawable, gc, theme);
+}
+
+void Neu_Splitter::handleXEvent(XEvent& ev)
+{
+    Neu_Rect r = bounds();
+    const int sash = 5;
+    const int split = vertical_ ? std::max(24, std::min(splitPosition_, r.width - 24))
+                                : std::max(24, std::min(splitPosition_, r.height - 24));
+    const int splitAbs = vertical_ ? r.x + split : r.y + split;
+    const bool onSash = vertical_
+                        ? (ev.x >= splitAbs - sash && ev.x <= splitAbs + sash && ev.y >= r.y && ev.y <= r.y + r.height)
+                        : (ev.y >= splitAbs - sash && ev.y <= splitAbs + sash && ev.x >= r.x && ev.x <= r.x + r.width);
+
+    if (ev.message == WM_LBUTTONDOWN && onSash) {
+        dragging_ = true;
+        return;
+    }
+    if (ev.message == WM_LBUTTONUP) {
+        dragging_ = false;
+    }
+    if (dragging_ && ev.message == WM_MOUSEMOVE) {
+        setSplitPosition(vertical_ ? ev.x - r.x : ev.y - r.y);
+        return;
+    }
+
+    if (ev.message == WM_MOUSEMOVE || ev.message == WM_LBUTTONDOWN || ev.message == WM_LBUTTONUP) {
+        for (auto it = children().rbegin(); it != children().rend(); ++it) {
+            auto& child = *it;
+            if (!child || !child->visible() || !child->enabled()) {
+                continue;
+            }
+            const Neu_Rect cr = child->bounds();
+            const bool firstPane = vertical_ ? (cr.x + cr.width / 2 < splitAbs) : (cr.y + cr.height / 2 < splitAbs);
+            const bool pointInPane = vertical_
+                                     ? (firstPane ? ev.x < splitAbs - sash : ev.x > splitAbs + sash)
+                                     : (firstPane ? ev.y < splitAbs - sash : ev.y > splitAbs + sash);
+            if (pointInPane && child->contains(ev.x, ev.y)) {
+                child->handleXEvent(ev);
+                return;
+            }
+        }
+    }
+
+    Neu_Control::handleXEvent(ev);
+}
+
+
 Neu_Window::Neu_Window(Neu_Application& app, int width, int height, const std::string& title)
     : app_(app),
       display_(nullptr),
       width_(std::max(1, width)),
       height_(std::max(1, height)),
-      title_(title)
+      title_(title),
+      theme_(Neu_Theme::MaterialDark())
 {
+    Neu_ApplyThemeRenderingOptions(theme_);
 }
 
 Neu_Window::~Neu_Window()
@@ -2511,8 +4020,16 @@ void Neu_Window::ensureBuffers()
     bufferHeight_ = height_;
 }
 
+void Neu_Window::setTheme(const Neu_Theme& theme)
+{
+    theme_ = theme;
+    Neu_ApplyThemeRenderingOptions(theme_);
+    requestRedraw();
+}
+
 void Neu_Window::drawScene(Drawable target)
 {
+    Neu_SetCurrentDrawingTheme(theme_);
     RECT rc{0, 0, width_, height_};
     HBRUSH b = CreateSolidBrush(rgb(theme_.background));
     FillRect(target, &rc, b);
@@ -2537,6 +4054,7 @@ void Neu_Window::drawScene(Drawable target)
 
 void Neu_Window::paint(Drawable target)
 {
+    Neu_SetCurrentDrawingTheme(theme_);
     if (!target || width_ <= 0 || height_ <= 0) {
         return;
     }
@@ -2603,8 +4121,9 @@ Neu_Control* Neu_Window::hitTest(int x, int y)
         }
 
         if (auto scroll = dynamic_cast<Neu_ScrollWindow*>(control.get())) {
-            const int childX = px + scroll->scrollX();
-            const int childY = py + scroll->scrollY();
+            const auto sr = scroll->bounds();
+            const int childX = px - (sr.x + 4) + scroll->scrollX();
+            const int childY = py - (sr.y + 4) + scroll->scrollY();
             const auto& children = scroll->children();
             for (auto child = children.rbegin(); child != children.rend(); ++child) {
                 Neu_Control* hit = self(self, *child, childX, childY);
@@ -2636,6 +4155,7 @@ Neu_Control* Neu_Window::hitTest(int x, int y)
     }
     return nullptr;
 }
+
 
 void Neu_Window::setFocusedControl(Neu_Control* control)
 {

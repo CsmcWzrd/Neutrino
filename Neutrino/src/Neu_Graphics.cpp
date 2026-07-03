@@ -5,6 +5,7 @@
 namespace neutrino {
 
 static Neu_SmoothGraphicsOptions g_smoothOptions{};
+static Neu_Theme g_currentDrawingTheme{};
 
 unsigned long Neu_Pixel(Display* display, const Neu_Color& color)
 {
@@ -48,6 +49,56 @@ Neu_Color Neu_PixelToColor(Display* display, unsigned long pixel)
         static_cast<uint8_t>(xcolor.blue / 257),
         255
     };
+}
+
+Neu_Color Neu_LightenColor(const Neu_Color& color, int amount)
+{
+    auto add = [amount](uint8_t value) -> uint8_t {
+        return static_cast<uint8_t>(std::min(255, static_cast<int>(value) + amount));
+    };
+    return {add(color.r), add(color.g), add(color.b), color.a};
+}
+
+Neu_Color Neu_DarkenColor(const Neu_Color& color, int amount)
+{
+    auto sub = [amount](uint8_t value) -> uint8_t {
+        return static_cast<uint8_t>(std::max(0, static_cast<int>(value) - amount));
+    };
+    return {sub(color.r), sub(color.g), sub(color.b), color.a};
+}
+
+Neu_Color Neu_MixColor(const Neu_Color& a, const Neu_Color& b, double t)
+{
+    t = std::max(0.0, std::min(1.0, t));
+    auto mix = [t](uint8_t av, uint8_t bv) -> uint8_t {
+        return static_cast<uint8_t>(std::round(static_cast<double>(av) * (1.0 - t) + static_cast<double>(bv) * t));
+    };
+    return {mix(a.r, b.r), mix(a.g, b.g), mix(a.b, b.b), mix(a.a, b.a)};
+}
+
+void Neu_ApplyThemeRenderingOptions(const Neu_Theme& theme)
+{
+    if (g_smoothOptions.vmFriendly) {
+        return;
+    }
+
+    g_smoothOptions.enabled = true;
+    if (theme.antiAliasMode == Neu_AntiAliasMode::SSAA) {
+        g_smoothOptions.backend = Neu_GraphicsBackend::SoftwareAntialias;
+        g_smoothOptions.supersample = std::max(4, std::min(8, theme.antiAliasSamples));
+    } else if (theme.antiAliasMode == Neu_AntiAliasMode::MSAA) {
+        g_smoothOptions.backend = Neu_GraphicsBackend::SoftwareAntialias;
+        g_smoothOptions.supersample = std::max(3, std::min(6, theme.antiAliasSamples));
+    } else {
+        g_smoothOptions.backend = Neu_GraphicsBackend::XRenderAntialias;
+        g_smoothOptions.supersample = std::max(2, std::min(4, theme.antiAliasSamples));
+    }
+}
+
+void Neu_SetCurrentDrawingTheme(const Neu_Theme& theme)
+{
+    g_currentDrawingTheme = theme;
+    Neu_ApplyThemeRenderingOptions(theme);
 }
 
 void Neu_SetSmoothGraphicsOptions(const Neu_SmoothGraphicsOptions& options)
@@ -209,68 +260,285 @@ void Neu_DrawSmoothRoundedRect(Display* display,
     XDestroyImage(image);
 }
 
-static void Neu_DrawRoundedRectBasic(Display* display,
-                                   Drawable drawable,
-                                   GC gc,
-                                   int x,
-                                   int y,
-                                   int width,
-                                   int height,
-                                   int radius,
-                                   bool fill)
+static bool Neu_HasEdgeCorners(const Neu_Theme& theme)
 {
-    if (radius < 1) {
+    return theme.topLeftCorner == Neu_CornerStyle::EdgeCorner
+           || theme.topRightCorner == Neu_CornerStyle::EdgeCorner
+           || theme.bottomLeftCorner == Neu_CornerStyle::EdgeCorner
+           || theme.bottomRightCorner == Neu_CornerStyle::EdgeCorner;
+}
+
+static bool Neu_InsideThemedShape(double px,
+                                  double py,
+                                  double width,
+                                  double height,
+                                  int radius,
+                                  int edge,
+                                  const Neu_Theme& theme)
+{
+    if (width <= 0.0 || height <= 0.0) {
+        return false;
+    }
+
+    const double right = width - 1.0;
+    const double bottom = height - 1.0;
+    const double e = std::max(0, std::min(edge, static_cast<int>(std::min(width, height) * 0.45)));
+
+    if (theme.topLeftCorner == Neu_CornerStyle::EdgeCorner && px + py < e) {
+        return false;
+    }
+    if (theme.topRightCorner == Neu_CornerStyle::EdgeCorner && (right - px) + py < e) {
+        return false;
+    }
+    if (theme.bottomLeftCorner == Neu_CornerStyle::EdgeCorner && px + (bottom - py) < e) {
+        return false;
+    }
+    if (theme.bottomRightCorner == Neu_CornerStyle::EdgeCorner && (right - px) + (bottom - py) < e) {
+        return false;
+    }
+
+    const double r = std::max(0, std::min(radius, static_cast<int>(std::min(width, height) * 0.5)));
+    if (r <= 0.0) {
+        return true;
+    }
+
+    auto roundedInside = [r](double dx, double dy) -> bool {
+        return dx * dx + dy * dy <= r * r;
+    };
+
+    if (theme.topLeftCorner == Neu_CornerStyle::RoundedCorner && px < r && py < r) {
+        return roundedInside(px - r, py - r);
+    }
+    if (theme.topRightCorner == Neu_CornerStyle::RoundedCorner && px > right - r && py < r) {
+        return roundedInside(px - (right - r), py - r);
+    }
+    if (theme.bottomLeftCorner == Neu_CornerStyle::RoundedCorner && px < r && py > bottom - r) {
+        return roundedInside(px - r, py - (bottom - r));
+    }
+    if (theme.bottomRightCorner == Neu_CornerStyle::RoundedCorner && px > right - r && py > bottom - r) {
+        return roundedInside(px - (right - r), py - (bottom - r));
+    }
+
+    return true;
+}
+
+static bool Neu_InsideThemedShapeInset(double px,
+                                       double py,
+                                       double width,
+                                       double height,
+                                       int radius,
+                                       int edge,
+                                       const Neu_Theme& theme,
+                                       double inset)
+{
+    return Neu_InsideThemedShape(px - inset,
+                                 py - inset,
+                                 width - inset * 2.0,
+                                 height - inset * 2.0,
+                                 std::max(0, radius - static_cast<int>(inset)),
+                                 std::max(0, edge - static_cast<int>(inset)),
+                                 theme);
+}
+
+static Neu_Color Neu_GradientColorForY(const Neu_Color& base, int y, int height, const Neu_Theme& theme)
+{
+    if (!theme.gradientControls || height <= 1) {
+        return base;
+    }
+
+    const double t = static_cast<double>(y) / static_cast<double>(std::max(1, height - 1));
+    const Neu_Color top = Neu_MixColor(base, theme.controlGradientTop, 0.42);
+    const Neu_Color bottom = Neu_MixColor(base, theme.controlGradientBottom, 0.42);
+    return Neu_MixColor(top, bottom, t);
+}
+
+static void Neu_DrawThemedRectImage(Display* display,
+                                    Drawable drawable,
+                                    GC gc,
+                                    const Neu_Color& color,
+                                    const Neu_Color& background,
+                                    int x,
+                                    int y,
+                                    int width,
+                                    int height,
+                                    int radius,
+                                    bool fill,
+                                    int supersample)
+{
+    if (!display || width <= 0 || height <= 0) {
+        return;
+    }
+
+    supersample = std::max(1, std::min(8, supersample));
+
+    XImage* image = XCreateImage(display,
+                                 DefaultVisual(display, DefaultScreen(display)),
+                                 DefaultDepth(display, DefaultScreen(display)),
+                                 ZPixmap,
+                                 0,
+                                 nullptr,
+                                 static_cast<unsigned int>(width),
+                                 static_cast<unsigned int>(height),
+                                 32,
+                                 0);
+    if (!image) {
+        return;
+    }
+
+    const size_t bytes = static_cast<size_t>(image->bytes_per_line) * static_cast<size_t>(height);
+    image->data = static_cast<char*>(std::calloc(bytes, 1));
+    if (!image->data) {
+        XDestroyImage(image);
+        return;
+    }
+
+    for (int pixelY = 0; pixelY < height; ++pixelY) {
+        for (int pixelX = 0; pixelX < width; ++pixelX) {
+            int hits = 0;
+            const int total = supersample * supersample;
+            for (int sampleY = 0; sampleY < supersample; ++sampleY) {
+                for (int sampleX = 0; sampleX < supersample; ++sampleX) {
+                    const double fx = pixelX + (sampleX + 0.5) / supersample;
+                    const double fy = pixelY + (sampleY + 0.5) / supersample;
+                    const bool outer = Neu_InsideThemedShape(fx,
+                                                             fy,
+                                                             width,
+                                                             height,
+                                                             radius,
+                                                             g_currentDrawingTheme.edgeSize,
+                                                             g_currentDrawingTheme);
+                    if (fill) {
+                        if (outer) {
+                            ++hits;
+                        }
+                    } else {
+                        const bool inner = Neu_InsideThemedShapeInset(fx,
+                                                                       fy,
+                                                                       width,
+                                                                       height,
+                                                                       radius,
+                                                                       g_currentDrawingTheme.edgeSize,
+                                                                       g_currentDrawingTheme,
+                                                                       1.65);
+                        if (outer && !inner) {
+                            ++hits;
+                        }
+                    }
+                }
+            }
+
+            const double coverage = static_cast<double>(hits) / static_cast<double>(total);
+            const Neu_Color source = fill ? Neu_GradientColorForY(color, pixelY, height, g_currentDrawingTheme) : color;
+            XPutPixel(image, pixelX, pixelY, Neu_Pixel(display, Neu_Blend(source, background, coverage)));
+        }
+    }
+
+    XPutImage(display,
+              drawable,
+              gc,
+              image,
+              0,
+              0,
+              x,
+              y,
+              static_cast<unsigned int>(width),
+              static_cast<unsigned int>(height));
+    XDestroyImage(image);
+}
+
+static void Neu_DrawThemedRectBasic(Display* display,
+                                    Drawable drawable,
+                                    GC gc,
+                                    int x,
+                                    int y,
+                                    int width,
+                                    int height,
+                                    int radius,
+                                    bool fill)
+{
+    if (!display || width <= 0 || height <= 0) {
+        return;
+    }
+
+    if (!Neu_HasEdgeCorners(g_currentDrawingTheme)) {
+        if (radius < 1) {
+            if (fill) {
+                XFillRectangle(display, drawable, gc, x, y, width, height);
+            } else {
+                XDrawRectangle(display, drawable, gc, x, y, width, height);
+            }
+            return;
+        }
+
+        const int r = std::min(radius, std::min(width, height) / 2);
         if (fill) {
-            XFillRectangle(display, drawable, gc, x, y, width, height);
+            XFillRectangle(display, drawable, gc, x + r, y, width - 2 * r, height);
+            XFillRectangle(display, drawable, gc, x, y + r, width, height - 2 * r);
+            XFillArc(display, drawable, gc, x, y, 2 * r, 2 * r, 90 * 64, 90 * 64);
+            XFillArc(display, drawable, gc, x + width - 2 * r, y, 2 * r, 2 * r, 0, 90 * 64);
+            XFillArc(display, drawable, gc, x, y + height - 2 * r, 2 * r, 2 * r, 180 * 64, 90 * 64);
+            XFillArc(display, drawable, gc, x + width - 2 * r, y + height - 2 * r, 2 * r, 2 * r, 270 * 64, 90 * 64);
         } else {
-            XDrawRectangle(display, drawable, gc, x, y, width, height);
+            XDrawArc(display, drawable, gc, x, y, 2 * r, 2 * r, 90 * 64, 90 * 64);
+            XDrawArc(display, drawable, gc, x + width - 2 * r, y, 2 * r, 2 * r, 0, 90 * 64);
+            XDrawArc(display, drawable, gc, x, y + height - 2 * r, 2 * r, 2 * r, 180 * 64, 90 * 64);
+            XDrawArc(display, drawable, gc, x + width - 2 * r, y + height - 2 * r, 2 * r, 2 * r, 270 * 64, 90 * 64);
+            XDrawLine(display, drawable, gc, x + r, y, x + width - r, y);
+            XDrawLine(display, drawable, gc, x + r, y + height, x + width - r, y + height);
+            XDrawLine(display, drawable, gc, x, y + r, x, y + height - r);
+            XDrawLine(display, drawable, gc, x + width, y + r, x + width, y + height - r);
         }
         return;
     }
 
-    const int r = std::min(radius, std::min(width, height) / 2);
+    const int e = std::max(0, std::min(g_currentDrawingTheme.edgeSize, std::min(width, height) / 2));
+    XPoint pts[8]{};
+    pts[0] = {static_cast<short>(x + (g_currentDrawingTheme.topLeftCorner == Neu_CornerStyle::EdgeCorner ? e : 0)), static_cast<short>(y)};
+    pts[1] = {static_cast<short>(x + width - (g_currentDrawingTheme.topRightCorner == Neu_CornerStyle::EdgeCorner ? e : 0)), static_cast<short>(y)};
+    pts[2] = {static_cast<short>(x + width), static_cast<short>(y + (g_currentDrawingTheme.topRightCorner == Neu_CornerStyle::EdgeCorner ? e : 0))};
+    pts[3] = {static_cast<short>(x + width), static_cast<short>(y + height - (g_currentDrawingTheme.bottomRightCorner == Neu_CornerStyle::EdgeCorner ? e : 0))};
+    pts[4] = {static_cast<short>(x + width - (g_currentDrawingTheme.bottomRightCorner == Neu_CornerStyle::EdgeCorner ? e : 0)), static_cast<short>(y + height)};
+    pts[5] = {static_cast<short>(x + (g_currentDrawingTheme.bottomLeftCorner == Neu_CornerStyle::EdgeCorner ? e : 0)), static_cast<short>(y + height)};
+    pts[6] = {static_cast<short>(x), static_cast<short>(y + height - (g_currentDrawingTheme.bottomLeftCorner == Neu_CornerStyle::EdgeCorner ? e : 0))};
+    pts[7] = {static_cast<short>(x), static_cast<short>(y + (g_currentDrawingTheme.topLeftCorner == Neu_CornerStyle::EdgeCorner ? e : 0))};
 
     if (fill) {
-        XFillRectangle(display, drawable, gc, x + r, y, width - 2 * r, height);
-        XFillRectangle(display, drawable, gc, x, y + r, width, height - 2 * r);
-        XFillArc(display, drawable, gc, x, y, 2 * r, 2 * r, 90 * 64, 90 * 64);
-        XFillArc(display, drawable, gc, x + width - 2 * r, y, 2 * r, 2 * r, 0, 90 * 64);
-        XFillArc(display, drawable, gc, x, y + height - 2 * r, 2 * r, 2 * r, 180 * 64, 90 * 64);
-        XFillArc(display, drawable, gc, x + width - 2 * r, y + height - 2 * r, 2 * r, 2 * r, 270 * 64, 90 * 64);
+        XFillPolygon(display, drawable, gc, pts, 8, Complex, CoordModeOrigin);
     } else {
-        XDrawArc(display, drawable, gc, x, y, 2 * r, 2 * r, 90 * 64, 90 * 64);
-        XDrawArc(display, drawable, gc, x + width - 2 * r, y, 2 * r, 2 * r, 0, 90 * 64);
-        XDrawArc(display, drawable, gc, x, y + height - 2 * r, 2 * r, 2 * r, 180 * 64, 90 * 64);
-        XDrawArc(display, drawable, gc, x + width - 2 * r, y + height - 2 * r, 2 * r, 2 * r, 270 * 64, 90 * 64);
-        XDrawLine(display, drawable, gc, x + r, y, x + width - r, y);
-        XDrawLine(display, drawable, gc, x + r, y + height, x + width - r, y + height);
-        XDrawLine(display, drawable, gc, x, y + r, x, y + height - r);
-        XDrawLine(display, drawable, gc, x + width, y + r, x + width, y + height - r);
+        XDrawLines(display, drawable, gc, pts, 8, CoordModeOrigin);
+        XDrawLine(display, drawable, gc, pts[7].x, pts[7].y, pts[0].x, pts[0].y);
     }
 }
 
 void Neu_DrawRoundedRect(Display* display,
-                       Drawable drawable,
-                       GC gc,
-                       int x,
-                       int y,
-                       int width,
-                       int height,
-                       int radius,
-                       bool fill)
+                         Drawable drawable,
+                         GC gc,
+                         int x,
+                         int y,
+                         int width,
+                         int height,
+                         int radius,
+                         bool fill)
 {
-    if (!g_smoothOptions.enabled || radius < 2 || g_smoothOptions.backend == Neu_GraphicsBackend::X11Basic) {
-        Neu_DrawRoundedRectBasic(display, drawable, gc, x, y, width, height, radius, fill);
+    if (!display || width <= 0 || height <= 0) {
         return;
     }
 
     XGCValues values{};
     XGetGCValues(display, gc, GCForeground | GCBackground, &values);
-    Neu_DrawSmoothRoundedRect(display,
+    const Neu_Color color = Neu_PixelToColor(display, values.foreground);
+    const Neu_Color background = Neu_PixelToColor(display, values.background);
+
+    if (!fill || !g_smoothOptions.enabled || g_smoothOptions.backend == Neu_GraphicsBackend::X11Basic) {
+        Neu_DrawThemedRectBasic(display, drawable, gc, x, y, width, height, radius, fill);
+        return;
+    }
+
+    Neu_DrawThemedRectImage(display,
                             drawable,
                             gc,
-                            Neu_PixelToColor(display, values.foreground),
-                            Neu_PixelToColor(display, values.background),
+                            color,
+                            background,
                             x,
                             y,
                             width,

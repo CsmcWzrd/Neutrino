@@ -44,6 +44,20 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "NeutrinoTest11RenderingBuff
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "NeutrinoTest12ScrollWindowsHeavyData", "NeutrinoTest12ScrollWindowsHeavyData.vcxproj", "{AA2E8366-246D-5A68-BA3A-CF4CFB22548B}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "NeutrinoTest13SwingSwtControls", "NeutrinoTest13SwingSwtControls.vcxproj", "{E77F4287-DD45-544C-BDF0-F7B1B606BBE8}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "NeutrinoTest14LabelOffsetsThemes", "NeutrinoTest14LabelOffsetsThemes.vcxproj", "{287F353A-72ED-5D56-96D0-9ED0C492D18E}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "NeutrinoTest15SelectionControls", "NeutrinoTest15SelectionControls.vcxproj", "{4D01A17A-A427-50E6-80C5-F428E12E437E}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "NeutrinoTest16ValueControls", "NeutrinoTest16ValueControls.vcxproj", "{5F1323F0-630A-556F-A1F0-14B3515C0F70}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "NeutrinoTest17TabsToolbarSplitter", "NeutrinoTest17TabsToolbarSplitter.vcxproj", "{D60B5D2E-CB77-567B-920B-825E93851BE6}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "NeutrinoTest18Stage2ScrollControls", "NeutrinoTest18Stage2ScrollControls.vcxproj", "{84A4DD91-0789-5F9C-97BF-B64A5C1264C9}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "NeutrinoTest19MaterialBeauty", "NeutrinoTest19MaterialBeauty.vcxproj", "{87E23700-C37F-5A0D-9961-BA6F1F18E351}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -134,6 +148,34 @@ Global
 		{AA2E8366-246D-5A68-BA3A-CF4CFB22548B}.Debug|x64.Build.0 = Debug|x64
 		{AA2E8366-246D-5A68-BA3A-CF4CFB22548B}.Release|x64.ActiveCfg = Release|x64
 		{AA2E8366-246D-5A68-BA3A-CF4CFB22548B}.Release|x64.Build.0 = Release|x64
+		{E77F4287-DD45-544C-BDF0-F7B1B606BBE8}.Debug|x64.ActiveCfg = Debug|x64
+		{E77F4287-DD45-544C-BDF0-F7B1B606BBE8}.Debug|x64.Build.0 = Debug|x64
+		{E77F4287-DD45-544C-BDF0-F7B1B606BBE8}.Release|x64.ActiveCfg = Release|x64
+		{E77F4287-DD45-544C-BDF0-F7B1B606BBE8}.Release|x64.Build.0 = Release|x64
+		{287F353A-72ED-5D56-96D0-9ED0C492D18E}.Debug|x64.ActiveCfg = Debug|x64
+		{287F353A-72ED-5D56-96D0-9ED0C492D18E}.Debug|x64.Build.0 = Debug|x64
+		{287F353A-72ED-5D56-96D0-9ED0C492D18E}.Release|x64.ActiveCfg = Release|x64
+		{287F353A-72ED-5D56-96D0-9ED0C492D18E}.Release|x64.Build.0 = Release|x64
+		{4D01A17A-A427-50E6-80C5-F428E12E437E}.Debug|x64.ActiveCfg = Debug|x64
+		{4D01A17A-A427-50E6-80C5-F428E12E437E}.Debug|x64.Build.0 = Debug|x64
+		{4D01A17A-A427-50E6-80C5-F428E12E437E}.Release|x64.ActiveCfg = Release|x64
+		{4D01A17A-A427-50E6-80C5-F428E12E437E}.Release|x64.Build.0 = Release|x64
+		{5F1323F0-630A-556F-A1F0-14B3515C0F70}.Debug|x64.ActiveCfg = Debug|x64
+		{5F1323F0-630A-556F-A1F0-14B3515C0F70}.Debug|x64.Build.0 = Debug|x64
+		{5F1323F0-630A-556F-A1F0-14B3515C0F70}.Release|x64.ActiveCfg = Release|x64
+		{5F1323F0-630A-556F-A1F0-14B3515C0F70}.Release|x64.Build.0 = Release|x64
+		{D60B5D2E-CB77-567B-920B-825E93851BE6}.Debug|x64.ActiveCfg = Debug|x64
+		{D60B5D2E-CB77-567B-920B-825E93851BE6}.Debug|x64.Build.0 = Debug|x64
+		{D60B5D2E-CB77-567B-920B-825E93851BE6}.Release|x64.ActiveCfg = Release|x64
+		{D60B5D2E-CB77-567B-920B-825E93851BE6}.Release|x64.Build.0 = Release|x64
+		{84A4DD91-0789-5F9C-97BF-B64A5C1264C9}.Debug|x64.ActiveCfg = Debug|x64
+		{84A4DD91-0789-5F9C-97BF-B64A5C1264C9}.Debug|x64.Build.0 = Debug|x64
+		{84A4DD91-0789-5F9C-97BF-B64A5C1264C9}.Release|x64.ActiveCfg = Release|x64
+		{84A4DD91-0789-5F9C-97BF-B64A5C1264C9}.Release|x64.Build.0 = Release|x64
+		{87E23700-C37F-5A0D-9961-BA6F1F18E351}.Debug|x64.ActiveCfg = Debug|x64
+		{87E23700-C37F-5A0D-9961-BA6F1F18E351}.Debug|x64.Build.0 = Debug|x64
+		{87E23700-C37F-5A0D-9961-BA6F1F18E351}.Release|x64.ActiveCfg = Release|x64
+		{87E23700-C37F-5A0D-9961-BA6F1F18E351}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

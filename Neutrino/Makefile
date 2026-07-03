@@ -7,6 +7,7 @@ XFT_CPPFLAGS := $(if $(XFT_LIBS),-DNEUTRINO_USE_XFT $(XFT_CFLAGS),)
 CPPFLAGS ?= -Iinclude
 LDFLAGS ?= -lX11 -ldl $(XFT_LIBS)
 SRC = src/Neu_Application.cpp \
+    src/Neu_AdditionalControls.cpp \
     src/Neu_Button.cpp \
     src/Neu_ComboBox.cpp \
     src/Neu_Control.cpp \
@@ -50,7 +51,14 @@ EXAMPLES = build/neutrino_demo \
     build/neutrino_test_09_readonly_richtext_icons \
     build/neutrino_test_10_images_progress_labels \
     build/neutrino_test_11_rendering_buffering \
-    build/neutrino_test_12_scroll_windows_heavy_data
+    build/neutrino_test_12_scroll_windows_heavy_data \
+    build/neutrino_test_13_swing_swt_controls \
+    build/neutrino_test_14_label_offsets_themes \
+    build/neutrino_test_15_selection_controls \
+    build/neutrino_test_16_value_controls \
+    build/neutrino_test_17_tabs_toolbar_splitter \
+    build/neutrino_test_18_stage2_scroll_controls \
+    build/neutrino_test_19_material_beauty
 
 all: $(LIB) $(EXAMPLES)
 

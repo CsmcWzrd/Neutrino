@@ -17,34 +17,46 @@ static int fragmentLineHeight(const Neu_TextFragment& f)
 void Neu_Label::draw(Display* display, Drawable drawable, GC gc, const Neu_Theme& theme)
 {
     const auto rect = bounds();
+    const auto off = textOffset_;
     if (borderVisible_) {
         XSetForeground(display, gc, Neu_Pixel(display, theme.border));
         XDrawRectangle(display, drawable, gc, rect.x, rect.y, std::max(1, rect.width - 1), std::max(1, rect.height - 1));
     }
-    const int iconSpace = !icon().pixels().empty() ? 24 : 0;
-    const int textLeft = rect.x + iconSpace + 2;
-    const int textWidth = std::max(1, rect.width - iconSpace - 4);
 
-    if (!icon().pixels().empty()) {
-        drawIconBmp(display, drawable, gc, rect.x, rect.y + std::max(0, (rect.height - 16) / 2), 16);
+    const int iconSize = !icon().pixels().empty() ? 16 : 0;
+    const int iconSpace = iconSize > 0 ? iconSize + 6 : 0;
+    const int contentLeft = rect.x + off.left;
+    const int contentTop = rect.y + off.top;
+    const int contentRight = rect.x + rect.width - off.right;
+    const int contentBottom = rect.y + rect.height - off.bottom;
+    const int textLeft = contentLeft + iconSpace;
+    const int textWidth = std::max(1, contentRight - textLeft);
+    const int contentHeight = std::max(1, contentBottom - contentTop);
+
+    if (iconSize > 0) {
+        drawIconBmp(display, drawable, gc, contentLeft, contentTop + std::max(0, (contentHeight - iconSize) / 2), iconSize);
     }
 
-    XRectangle clip{static_cast<short>(textLeft),
-                    static_cast<short>(rect.y),
-                    static_cast<unsigned short>(std::max(1, textWidth)),
-                    static_cast<unsigned short>(std::max(1, rect.height))};
+    XRectangle clip{static_cast<short>(std::max(rect.x, textLeft)),
+                    static_cast<short>(std::max(rect.y, contentTop)),
+                    static_cast<unsigned short>(std::max(1, std::min(rect.x + rect.width, contentRight) - std::max(rect.x, textLeft))),
+                    static_cast<unsigned short>(std::max(1, std::min(rect.y + rect.height, contentBottom) - std::max(rect.y, contentTop)))};
     XSetClipRectangles(display, gc, 0, 0, &clip, 1, Unsorted);
 
     if (!richTextFragments().empty()) {
         int x = textLeft;
-        const int y = rect.y + rect.height / 2 + 5;
+        const int y = contentTop + std::max(14, contentHeight / 2 + 5);
         for (const auto& f : richTextFragments()) {
-            const std::string visible = truncateText_ ? truncateTextToWidth(display, drawable, gc, theme, f.text, textLeft + textWidth - x) : f.text;
+            if (x >= contentRight) {
+                break;
+            }
+            const int remaining = std::max(1, contentRight - x);
+            const std::string visible = truncateText_ ? truncateTextToWidth(display, drawable, gc, theme, f.text, remaining) : f.text;
             const Neu_Color color = f.useFontColor ? f.fontColor : theme.text;
             if (f.useHighlightColor || f.useBackgroundColor) {
                 const int w = measureTextWidth(display, drawable, gc, theme, visible, f.bold, f.italic, f.monospace, f.headingLevel);
                 XSetForeground(display, gc, Neu_Pixel(display, f.useHighlightColor ? f.highlightColor : f.backgroundColor));
-                XFillRectangle(display, drawable, gc, x, y - 14, std::max(1, w), 18);
+                XFillRectangle(display, drawable, gc, x, y - 14, std::max(1, std::min(w, remaining)), 18);
             }
             drawTextColored(display,
                             drawable,
@@ -62,18 +74,16 @@ void Neu_Label::draw(Display* display, Drawable drawable, GC gc, const Neu_Theme
                             f.monospace,
                             f.headingLevel);
             x += measureTextWidth(display, drawable, gc, theme, visible, f.bold, f.italic, f.monospace, f.headingLevel) + 2;
-            if (x >= textLeft + textWidth) {
-                break;
-            }
         }
     } else if (wordWrap_) {
         auto lines = wrapTextToWidth(display, drawable, gc, theme, text(), textWidth);
-        int y = rect.y + 16;
+        int y = contentTop + 14;
         for (const auto& line : lines) {
-            if (y >= rect.y + rect.height) {
+            if (y >= contentBottom) {
                 break;
             }
-            drawText(display, drawable, gc, theme, line, alignedTextX(display, drawable, gc, theme, line, textLeft, textWidth), y);
+            const std::string visible = truncateText_ ? truncateTextToWidth(display, drawable, gc, theme, line, textWidth) : line;
+            drawText(display, drawable, gc, theme, visible, alignedTextX(display, drawable, gc, theme, visible, textLeft, textWidth), y);
             y += 18;
         }
     } else {
@@ -84,7 +94,7 @@ void Neu_Label::draw(Display* display, Drawable drawable, GC gc, const Neu_Theme
                  theme,
                  visible,
                  alignedTextX(display, drawable, gc, theme, visible, textLeft, textWidth),
-                 rect.y + rect.height / 2 + 5);
+                 contentTop + std::max(14, contentHeight / 2 + 5));
     }
 
     XSetClipMask(display, gc, None);
@@ -94,25 +104,32 @@ void Neu_Label::draw(Display* display, Drawable drawable, GC gc, const Neu_Theme
 void Neu_MultilineLabel::draw(Display* display, Drawable drawable, GC gc, const Neu_Theme& theme)
 {
     const auto rect = bounds();
+    const auto off = textOffset_;
     if (borderVisible_) {
         XSetForeground(display, gc, Neu_Pixel(display, theme.border));
         XDrawRectangle(display, drawable, gc, rect.x, rect.y, std::max(1, rect.width - 1), std::max(1, rect.height - 1));
     }
-    const int iconSpace = !icon().pixels().empty() ? 26 : 0;
-    const int textLeft = rect.x + iconSpace + 2;
-    const int contentWidth = std::max(1, rect.width - iconSpace - 14);
 
-    if (!icon().pixels().empty()) {
-        drawIconBmp(display, drawable, gc, rect.x, rect.y + 4, 20);
+    const int iconSize = !icon().pixels().empty() ? 20 : 0;
+    const int iconSpace = iconSize > 0 ? iconSize + 6 : 0;
+    const int contentLeft = rect.x + off.left;
+    const int contentTop = rect.y + off.top;
+    const int contentRight = rect.x + rect.width - off.right - 10;
+    const int contentBottom = rect.y + rect.height - off.bottom;
+    const int textLeft = contentLeft + iconSpace;
+    const int contentWidth = std::max(1, contentRight - textLeft);
+
+    if (iconSize > 0) {
+        drawIconBmp(display, drawable, gc, contentLeft, contentTop + 2, iconSize);
     }
 
-    XRectangle clip{static_cast<short>(textLeft),
-                    static_cast<short>(rect.y),
-                    static_cast<unsigned short>(std::max(1, contentWidth)),
-                    static_cast<unsigned short>(std::max(1, rect.height))};
+    XRectangle clip{static_cast<short>(std::max(rect.x, textLeft)),
+                    static_cast<short>(std::max(rect.y, contentTop)),
+                    static_cast<unsigned short>(std::max(1, std::min(rect.x + rect.width, contentRight) - std::max(rect.x, textLeft))),
+                    static_cast<unsigned short>(std::max(1, std::min(rect.y + rect.height, contentBottom) - std::max(rect.y, contentTop)))};
     XSetClipRectangles(display, gc, 0, 0, &clip, 1, Unsorted);
 
-    int y = rect.y + 16 - scrollY();
+    int y = contentTop + 14 - scrollY();
     int naturalHeight = 12;
 
     if (!richTextFragments().empty()) {
@@ -120,13 +137,14 @@ void Neu_MultilineLabel::draw(Display* display, Drawable drawable, GC gc, const 
             const int lineHeight = fragmentLineHeight(f);
             const auto parts = wrapTextToWidth(display, drawable, gc, theme, f.text, contentWidth);
             for (const auto& part : parts) {
-                if (y >= rect.y + 12 && y < rect.y + rect.height) {
+                if (y >= contentTop + 12 && y < contentBottom) {
                     const Neu_Color color = f.useFontColor ? f.fontColor : theme.text;
+                    const std::string visible = truncateText_ ? truncateTextToWidth(display, drawable, gc, theme, part, contentWidth) : part;
                     drawTextColored(display,
                                     drawable,
                                     gc,
                                     theme,
-                                    truncateText_ ? truncateTextToWidth(display, drawable, gc, theme, part, contentWidth) : part,
+                                    visible,
                                     textLeft,
                                     y,
                                     color,
@@ -143,15 +161,17 @@ void Neu_MultilineLabel::draw(Display* display, Drawable drawable, GC gc, const 
             }
         }
     } else {
-        const auto lines = wrapTextToWidth(display, drawable, gc, theme, text(), contentWidth);
+        const auto lines = wordWrap_ ? wrapTextToWidth(display, drawable, gc, theme, text(), contentWidth)
+                                     : std::vector<std::string>{text()};
         for (const auto& line : lines) {
-            if (y >= rect.y + 12 && y < rect.y + rect.height) {
+            if (y >= contentTop + 12 && y < contentBottom) {
+                const std::string visible = truncateText_ ? truncateTextToWidth(display, drawable, gc, theme, line, contentWidth) : line;
                 drawText(display,
                          drawable,
                          gc,
                          theme,
-                         truncateText_ ? truncateTextToWidth(display, drawable, gc, theme, line, contentWidth) : line,
-                         alignedTextX(display, drawable, gc, theme, line, textLeft, contentWidth),
+                         visible,
+                         alignedTextX(display, drawable, gc, theme, visible, textLeft, contentWidth),
                          y);
             }
             y += 18;
@@ -161,7 +181,7 @@ void Neu_MultilineLabel::draw(Display* display, Drawable drawable, GC gc, const 
 
     XSetClipMask(display, gc, None);
     const_cast<Neu_MultilineLabel*>(this)->setAutoScroll(true);
-    const_cast<Neu_MultilineLabel*>(this)->setVirtualSize(rect.width, std::max(rect.height, naturalHeight));
+    const_cast<Neu_MultilineLabel*>(this)->setVirtualSize(rect.width, std::max(rect.height, naturalHeight + off.top + off.bottom));
     drawScrollbars(display, drawable, gc, theme);
     drawHintPopup(display, drawable, gc, theme);
 }

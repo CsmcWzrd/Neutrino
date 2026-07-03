@@ -4,18 +4,61 @@ namespace neutrino {
 
 namespace {
 
-static void offsetEvent(XEvent& event, int dx, int dy)
+static int eventX(const XEvent& event, int fallback)
 {
     if (event.type == MotionNotify) {
-        event.xmotion.x += dx;
-        event.xmotion.y += dy;
+        return event.xmotion.x;
+    }
+    if (event.type == ButtonPress || event.type == ButtonRelease) {
+        return event.xbutton.x;
+    }
+    return fallback;
+}
+
+static int eventY(const XEvent& event, int fallback)
+{
+    if (event.type == MotionNotify) {
+        return event.xmotion.y;
+    }
+    if (event.type == ButtonPress || event.type == ButtonRelease) {
+        return event.xbutton.y;
+    }
+    return fallback;
+}
+
+static void setEventPosition(XEvent& event, int x, int y)
+{
+    if (event.type == MotionNotify) {
+        event.xmotion.x = x;
+        event.xmotion.y = y;
     } else if (event.type == ButtonPress || event.type == ButtonRelease) {
-        event.xbutton.x += dx;
-        event.xbutton.y += dy;
+        event.xbutton.x = x;
+        event.xbutton.y = y;
     }
 }
 
 } // namespace
+
+void Neu_ScrollWindow::add(std::shared_ptr<Neu_Control> child)
+{
+    if (!child) {
+        return;
+    }
+
+    Neu_Layout childLayout = child->layout();
+    const auto rect = bounds();
+
+    // Scroll-window children are stored in content-relative coordinates.  Older
+    // demos used window-absolute positions, so convert coordinates that appear
+    // to be absolute when the child is added.
+    if (childLayout.left >= rect.x && childLayout.top >= rect.y) {
+        childLayout.left -= rect.x;
+        childLayout.top -= rect.y;
+        child->setLayout(childLayout);
+    }
+
+    Neu_Placement::add(child);
+}
 
 void Neu_ScrollWindow::draw(Display* display, Drawable drawable, GC gc, const Neu_Theme& theme)
 {
@@ -50,8 +93,8 @@ void Neu_ScrollWindow::draw(Display* display, Drawable drawable, GC gc, const Ne
         if (child && child->visible()) {
             Neu_Layout original = child->layout();
             Neu_Layout shifted = original;
-            shifted.left = original.left - scrollX() - viewportLeft;
-            shifted.top = original.top - scrollY() - viewportTop;
+            shifted.left = original.left - scrollX();
+            shifted.top = original.top - scrollY();
             child->setLayout(shifted);
             const auto childRect = child->bounds();
             const bool intersects = childRect.x + childRect.width >= 0
@@ -63,8 +106,8 @@ void Neu_ScrollWindow::draw(Display* display, Drawable drawable, GC gc, const Ne
                 child->draw(display, viewportPixmap, gc, theme);
                 XSetClipRectangles(display, gc, 0, 0, &localClip, 1, Unsorted);
             }
-            maxRight = std::max(maxRight, original.left - rect.x + original.width + 20);
-            maxBottom = std::max(maxBottom, original.top - rect.y + original.height + 20);
+            maxRight = std::max(maxRight, original.left + original.width + 20);
+            maxBottom = std::max(maxBottom, original.top + original.height + 20);
             child->setLayout(original);
         }
     }
@@ -83,7 +126,7 @@ void Neu_ScrollWindow::draw(Display* display, Drawable drawable, GC gc, const Ne
     XFreePixmap(display, viewportPixmap);
 
     setAutoScroll(true);
-    setVirtualSize(std::max(virtualSize().width, maxRight), std::max(virtualSize().height, maxBottom));
+    setVirtualSize(std::max(rect.width, maxRight), std::max(rect.height, maxBottom));
     drawScrollbars(display, drawable, gc, theme);
     drawHintPopup(display, drawable, gc, theme);
 }
@@ -91,8 +134,8 @@ void Neu_ScrollWindow::draw(Display* display, Drawable drawable, GC gc, const Ne
 void Neu_ScrollWindow::handleXEvent(XEvent& event)
 {
     const auto rect = bounds();
-    const int x = event.type == MotionNotify ? event.xmotion.x : (event.type == ButtonPress || event.type == ButtonRelease ? event.xbutton.x : rect.x);
-    const int y = event.type == MotionNotify ? event.xmotion.y : (event.type == ButtonPress || event.type == ButtonRelease ? event.xbutton.y : rect.y);
+    const int x = eventX(event, rect.x);
+    const int y = eventY(event, rect.y);
     if (!contains(x, y)) {
         Neu_Control::handleXEvent(event);
         return;
@@ -115,7 +158,7 @@ void Neu_ScrollWindow::handleXEvent(XEvent& event)
 
     if (event.type == MotionNotify || event.type == ButtonPress || event.type == ButtonRelease) {
         XEvent adjusted = event;
-        offsetEvent(adjusted, scrollX(), scrollY());
+        setEventPosition(adjusted, x - viewportLeft + scrollX(), y - viewportTop + scrollY());
         for (auto it = children().rbegin(); it != children().rend(); ++it) {
             const auto& child = *it;
             if (child && child->visible() && child->enabled()) {
