@@ -11,6 +11,8 @@ static void apply_theme_by_slot(Neu_Window& win, int slot)
     }
 }
 
+static std::vector<std::pair<Neu_Window*, int>> g_themeButtonPayloads;
+
 int main(int argc, char** argv)
 {
     Neu_Application app;
@@ -27,6 +29,8 @@ int main(int argc, char** argv)
     auto status = add_status(win, "Stage2: label text offsets/insets, optional borders, wrapping/truncation, and theme gallery.");
 
     const auto names = Neu_Theme::BuiltInThemeNames();
+    g_themeButtonPayloads.clear();
+    g_themeButtonPayloads.reserve(std::max<size_t>(names.size(), 32));
     int x = 24;
     int y = 78;
     int index = 0;
@@ -39,11 +43,15 @@ int main(int argc, char** argv)
         Neu_Callbacks cb = click_callbacks(status.get());
         cb.onClick = [](Neu_Control* sender, void* user_data) {
             auto* pair = static_cast<std::pair<Neu_Window*, int>*>(user_data);
-            apply_theme_by_slot(*pair->first, pair->second);
-            sender->requestRedraw();
+            if (pair && pair->first) {
+                apply_theme_by_slot(*pair->first, pair->second);
+                pair->first->requestRedraw();
+            } else if (sender) {
+                sender->requestRedraw();
+            }
         };
-        auto* data = new std::pair<Neu_Window*, int>(&win, slot);
-        cb.userData = data;
+        g_themeButtonPayloads.emplace_back(&win, slot);
+        cb.userData = &g_themeButtonPayloads.back();
         swatch->setCallbacks(cb);
         win.add(swatch);
         x += 170;

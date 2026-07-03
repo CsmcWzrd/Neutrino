@@ -401,13 +401,28 @@ public:
     void bind(Neu_StringTable* model) { model_ = model; }
     Neu_StringTable* model() const { return model_; }
     Neu_TypedValue cellValue(size_t r, size_t c) const;
+    void setColumnWidths(const std::vector<int>& widths);
+    void setColumnWidth(size_t column, int width);
+    int columnWidth(size_t column) const;
+    void setHeaderResizable(bool enabled) { headerResizable_ = enabled; requestRedraw(); }
+    bool headerResizable() const { return headerResizable_; }
+    void setHeaderHeight(int height) { headerHeight_ = std::max(18, height); requestRedraw(); }
+    int headerHeight() const { return headerHeight_; }
     void setMultiSelect(bool enabled) { multiSelect_ = enabled; requestRedraw(); }
     bool multiSelect() const { return multiSelect_; }
     const std::set<int>& selectedRows() const { return selectedRows_; }
     void draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme) override;
     void handleXEvent(XEvent& ev) override;
-private:
+protected:
+    int effectiveColumnWidth(size_t column, int controlWidth = 0) const;
+    int totalColumnWidth(size_t columnCount, int controlWidth = 0) const;
     Neu_StringTable* model_{nullptr};
+    std::vector<int> columnWidths_;
+    int headerHeight_{24};
+    bool headerResizable_{true};
+    int resizingColumn_{-1};
+    int resizeStartX_{0};
+    int resizeStartWidth_{0};
     int selectedRow_{-1};
     int selectedCol_{-1};
     int hoveredRow_{-1};
@@ -428,6 +443,8 @@ public:
     void setMultiSelect(bool enabled) { multiSelect_ = enabled; requestRedraw(); }
     bool multiSelect() const { return multiSelect_; }
     const std::set<int>& selectedVisibleRows() const { return selectedVisibleRows_; }
+    void setTreeColumnWidth(int width) { treeColumnWidth_ = std::max(96, width); requestRedraw(); }
+    int treeColumnWidth() const { return treeColumnWidth_; }
     void draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme) override;
     void handleXEvent(XEvent& ev) override;
 
@@ -438,6 +455,10 @@ private:
     int anchorVisibleRow_{-1};
     bool multiSelect_{true};
     std::set<int> selectedVisibleRows_;
+    int treeColumnWidth_{260};
+    bool headerResizeActive_{false};
+    int headerResizeStartX_{0};
+    int headerResizeStartWidth_{0};
 };
 
 class Neu_Placement : public Neu_Control {
@@ -488,6 +509,7 @@ class Neu_ScrollWindow : public Neu_Placement {
 public:
     using Neu_Placement::Neu_Placement;
     const char* className() const override { return "Neu_ScrollWindow"; }
+    void add(std::shared_ptr<Neu_Control> child);
     void setContentSize(int width, int height) { setVirtualSize(width, height); setAutoScroll(true); }
     void draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme) override;
     void handleXEvent(XEvent& ev) override;

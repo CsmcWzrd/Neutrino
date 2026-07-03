@@ -14,15 +14,10 @@ Neu_Control* hitOne(const std::shared_ptr<Neu_Control>& control, int x, int y)
     }
 
     if (auto scroll = dynamic_cast<Neu_ScrollWindow*>(control.get())) {
-        const int childX = x + scroll->scrollX();
-        const int childY = y + scroll->scrollY();
-        const auto& children = scroll->children();
-        for (auto it = children.rbegin(); it != children.rend(); ++it) {
-            Neu_Control* hit = hitOne(*it, childX, childY);
-            if (hit) {
-                return hit;
-            }
-        }
+        // A scroll window must receive pointer events first so it can translate
+        // window coordinates into content-relative coordinates before forwarding
+        // to children. Returning child controls here made moved/scrolling
+        // viewports desynchronize event routing from the painted content.
         return scroll;
     }
 

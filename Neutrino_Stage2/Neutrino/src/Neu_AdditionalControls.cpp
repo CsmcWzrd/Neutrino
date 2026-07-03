@@ -69,6 +69,48 @@ static void drawClippedText(Display* display,
     XSetClipMask(display, gc, None);
 }
 
+
+static void drawTriangle(Display* display, Drawable drawable, GC gc, const Neu_Theme& theme, int cx, int cy, bool up)
+{
+    XSetForeground(display, gc, Neu_Pixel(display, theme.text));
+    const int halfWidth = 4;
+    const int halfHeight = 3;
+    if (up) {
+        XPoint pts[3]{{static_cast<short>(cx - halfWidth), static_cast<short>(cy + halfHeight)},
+                      {static_cast<short>(cx + halfWidth), static_cast<short>(cy + halfHeight)},
+                      {static_cast<short>(cx), static_cast<short>(cy - halfHeight)}};
+        XFillPolygon(display, drawable, gc, pts, 3, Convex, CoordModeOrigin);
+    } else {
+        XPoint pts[3]{{static_cast<short>(cx - halfWidth), static_cast<short>(cy - halfHeight)},
+                      {static_cast<short>(cx + halfWidth), static_cast<short>(cy - halfHeight)},
+                      {static_cast<short>(cx), static_cast<short>(cy + halfHeight)}};
+        XFillPolygon(display, drawable, gc, pts, 3, Convex, CoordModeOrigin);
+    }
+}
+
+
+static void drawSmallTriangle(Display* display,
+                              Drawable drawable,
+                              GC gc,
+                              const Neu_Color& color,
+                              int centerX,
+                              int centerY,
+                              bool up)
+{
+    XPoint points[3];
+    if (up) {
+        points[0] = XPoint{static_cast<short>(centerX), static_cast<short>(centerY - 4)};
+        points[1] = XPoint{static_cast<short>(centerX - 5), static_cast<short>(centerY + 3)};
+        points[2] = XPoint{static_cast<short>(centerX + 5), static_cast<short>(centerY + 3)};
+    } else {
+        points[0] = XPoint{static_cast<short>(centerX - 5), static_cast<short>(centerY - 3)};
+        points[1] = XPoint{static_cast<short>(centerX + 5), static_cast<short>(centerY - 3)};
+        points[2] = XPoint{static_cast<short>(centerX), static_cast<short>(centerY + 4)};
+    }
+    XSetForeground(display, gc, Neu_Pixel(display, color));
+    XFillPolygon(display, drawable, gc, points, 3, Convex, CoordModeOrigin);
+}
+
 static bool primaryButtonPress(const XEvent& ev)
 {
     return ev.type == ButtonPress && ev.xbutton.button == Button1;
@@ -90,12 +132,13 @@ void Neu_CheckBox::draw(Display* display, Drawable drawable, GC gc, const Neu_Th
 
     XSetForeground(display, gc, Neu_Pixel(display, hover_ ? theme.hover : theme.glass));
     XFillRectangle(display, drawable, gc, rect.x, rect.y, static_cast<unsigned int>(rect.width), static_cast<unsigned int>(rect.height));
-    XSetForeground(display, gc, Neu_Pixel(display, focused_ ? theme.accent : theme.border));
-    XDrawRectangle(display, drawable, gc, boxX, boxY, box, box);
+    Neu_DrawSmoothRoundedRect(display, drawable, gc, theme.glass, theme.background, boxX, boxY, box, box, 4, true);
+    Neu_DrawSmoothRoundedRect(display, drawable, gc, focused_ ? theme.accent : theme.border, theme.background, boxX, boxY, box, box, 4, false);
     if (checked_) {
         XSetForeground(display, gc, Neu_Pixel(display, theme.accent));
         XDrawLine(display, drawable, gc, boxX + 3, boxY + box / 2, boxX + box / 2, boxY + box - 3);
         XDrawLine(display, drawable, gc, boxX + box / 2, boxY + box - 3, boxX + box - 3, boxY + 3);
+        XDrawLine(display, drawable, gc, boxX + 4, boxY + box / 2, boxX + box / 2 + 1, boxY + box - 3);
     }
 
     const int textLeft = boxX + box + 7 + textOffset_.left;
@@ -126,11 +169,10 @@ void Neu_RadioButton::draw(Display* display, Drawable drawable, GC gc, const Neu
 
     XSetForeground(display, gc, Neu_Pixel(display, hover_ ? theme.hover : theme.glass));
     XFillRectangle(display, drawable, gc, rect.x, rect.y, static_cast<unsigned int>(rect.width), static_cast<unsigned int>(rect.height));
-    XSetForeground(display, gc, Neu_Pixel(display, focused_ ? theme.accent : theme.border));
-    XDrawArc(display, drawable, gc, cx - size / 2, cy - size / 2, size, size, 0, 360 * 64);
+    Neu_DrawSmoothRoundedRect(display, drawable, gc, theme.glass, theme.background, cx - size / 2, cy - size / 2, size, size, size / 2, true);
+    Neu_DrawSmoothRoundedRect(display, drawable, gc, focused_ ? theme.accent : theme.border, theme.background, cx - size / 2, cy - size / 2, size, size, size / 2, false);
     if (checked_) {
-        XSetForeground(display, gc, Neu_Pixel(display, theme.accent));
-        XFillArc(display, drawable, gc, cx - size / 4, cy - size / 4, size / 2, size / 2, 0, 360 * 64);
+        Neu_DrawSmoothRoundedRect(display, drawable, gc, theme.accent, theme.background, cx - size / 4, cy - size / 4, size / 2, size / 2, size / 4, true);
     }
 
     const int textLeft = rect.x + 4 + size + 7 + textOffset_.left;
@@ -229,8 +271,11 @@ void Neu_Spinner::draw(Display* display, Drawable drawable, GC gc, const Neu_The
                     rect.y + rect.height / 2 + 5);
     XSetForeground(display, gc, Neu_Pixel(display, theme.border));
     XDrawLine(display, drawable, gc, rect.x + rect.width - buttonW, rect.y + 2, rect.x + rect.width - buttonW, rect.y + rect.height - 2);
-    drawText(display, drawable, gc, theme, "^", rect.x + rect.width - 16, rect.y + 14);
-    drawText(display, drawable, gc, theme, "v", rect.x + rect.width - 16, rect.y + rect.height - 5);
+    const int arrowX = rect.x + rect.width - buttonW / 2;
+    const int topButtonTop = rect.y + 2;
+    const int bottomButtonBottom = rect.y + rect.height - 2;
+    drawTriangle(display, drawable, gc, theme, arrowX, topButtonTop + std::max(7, (rect.height - 4) / 4), true);
+    drawTriangle(display, drawable, gc, theme, arrowX, bottomButtonBottom - std::max(7, (rect.height - 4) / 4), false);
     drawHintPopup(display, drawable, gc, theme);
 }
 
@@ -371,32 +416,103 @@ void Neu_TabView::handleXEvent(XEvent& ev)
 
 void Neu_Splitter::draw(Display* display, Drawable drawable, GC gc, const Neu_Theme& theme)
 {
-    Neu_Placement::draw(display, drawable, gc, theme);
+    Neu_Control::draw(display, drawable, gc, theme);
     const auto rect = bounds();
+    const int sash = 5;
+    const int split = vertical_ ? std::max(24, std::min(splitPosition_, rect.width - 24))
+                                : std::max(24, std::min(splitPosition_, rect.height - 24));
+
+    XRectangle firstPane{};
+    XRectangle secondPane{};
+    if (vertical_) {
+        firstPane = XRectangle{static_cast<short>(rect.x + 4),
+                               static_cast<short>(rect.y + 4),
+                               static_cast<unsigned short>(std::max(1, split - sash - 4)),
+                               static_cast<unsigned short>(std::max(1, rect.height - 8))};
+        secondPane = XRectangle{static_cast<short>(rect.x + split + sash),
+                                static_cast<short>(rect.y + 4),
+                                static_cast<unsigned short>(std::max(1, rect.width - split - sash - 8)),
+                                static_cast<unsigned short>(std::max(1, rect.height - 8))};
+    } else {
+        firstPane = XRectangle{static_cast<short>(rect.x + 4),
+                               static_cast<short>(rect.y + 4),
+                               static_cast<unsigned short>(std::max(1, rect.width - 8)),
+                               static_cast<unsigned short>(std::max(1, split - sash - 4))};
+        secondPane = XRectangle{static_cast<short>(rect.x + 4),
+                                static_cast<short>(rect.y + split + sash),
+                                static_cast<unsigned short>(std::max(1, rect.width - 8)),
+                                static_cast<unsigned short>(std::max(1, rect.height - split - sash - 8))};
+    }
+
+    for (auto& child : children()) {
+        if (!child || !child->visible()) {
+            continue;
+        }
+        const auto childRect = child->bounds();
+        const bool inFirstPane = vertical_ ? (childRect.x + childRect.width / 2 < rect.x + split)
+                                           : (childRect.y + childRect.height / 2 < rect.y + split);
+        XRectangle pane = inFirstPane ? firstPane : secondPane;
+        XSetClipRectangles(display, gc, 0, 0, &pane, 1, Unsorted);
+        child->draw(display, drawable, gc, theme);
+        XSetClipMask(display, gc, None);
+    }
+
     XSetForeground(display, gc, Neu_Pixel(display, theme.accent));
     if (vertical_) {
-        const int x = rect.x + std::min(splitPosition_, rect.width - 4);
+        const int x = rect.x + split;
         XFillRectangle(display, drawable, gc, x - 2, rect.y + 4, 4, std::max(1, rect.height - 8));
     } else {
-        const int y = rect.y + std::min(splitPosition_, rect.height - 4);
+        const int y = rect.y + split;
         XFillRectangle(display, drawable, gc, rect.x + 4, y - 2, std::max(1, rect.width - 8), 4);
     }
+    drawHintPopup(display, drawable, gc, theme);
 }
 
 void Neu_Splitter::handleXEvent(XEvent& ev)
 {
     const auto rect = bounds();
-    if (primaryButtonPress(ev) && contains(ev.xbutton.x, ev.xbutton.y)) {
+    const int ex = eventX(ev);
+    const int ey = eventY(ev);
+    const int sash = 5;
+    const int split = vertical_ ? std::max(24, std::min(splitPosition_, rect.width - 24))
+                                : std::max(24, std::min(splitPosition_, rect.height - 24));
+
+    const bool onSash = vertical_
+                        ? (ex >= rect.x + split - sash && ex <= rect.x + split + sash && ey >= rect.y && ey <= rect.y + rect.height)
+                        : (ey >= rect.y + split - sash && ey <= rect.y + split + sash && ex >= rect.x && ex <= rect.x + rect.width);
+
+    if (primaryButtonPress(ev) && onSash) {
         dragging_ = true;
+        return;
     }
     if (primaryButtonRelease(ev)) {
         dragging_ = false;
     }
     if (dragging_ && ev.type == MotionNotify) {
-        setSplitPosition(vertical_ ? ev.xmotion.x - rect.x : ev.xmotion.y - rect.y);
+        setSplitPosition(vertical_ ? ex - rect.x : ey - rect.y);
         return;
     }
-    Neu_Placement::handleXEvent(ev);
+
+    if (ev.type == MotionNotify || ev.type == ButtonPress || ev.type == ButtonRelease) {
+        for (auto it = children().rbegin(); it != children().rend(); ++it) {
+            auto& child = *it;
+            if (!child || !child->visible() || !child->enabled()) {
+                continue;
+            }
+            const auto childRect = child->bounds();
+            const bool firstPane = vertical_ ? (childRect.x + childRect.width / 2 < rect.x + split)
+                                             : (childRect.y + childRect.height / 2 < rect.y + split);
+            const bool pointInPane = vertical_
+                                     ? (firstPane ? ex < rect.x + split - sash : ex > rect.x + split + sash)
+                                     : (firstPane ? ey < rect.y + split - sash : ey > rect.y + split + sash);
+            if (pointInPane && child->contains(ex, ey)) {
+                child->handleXEvent(ev);
+                return;
+            }
+        }
+    }
+
+    Neu_Control::handleXEvent(ev);
 }
 
 } // namespace neutrino

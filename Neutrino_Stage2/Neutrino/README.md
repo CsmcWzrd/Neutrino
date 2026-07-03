@@ -387,36 +387,6 @@ NEUTRINO_VM_MODE=1 ./build/neutrino_test_heavy_data
 
 VM mode keeps multi-stage buffering enabled but disables expensive supersampled drawing and soft shadows.
 
-## Neutrino Stage2 Additions
+## Stage2 fix pack notes
 
-Stage2 checkpoints the previous package as Stage1 and adds label text offset/inset support, 24+ additional built-in themes, and Swing/SWT-inspired controls while preserving the existing fixed-position layout system.
-
-Label text can be inset from each side:
-
-```cpp
-label->setTextOffset(top, right, bottom, left);
-label->setTextInsets(left, top, right, bottom);
-```
-
-Built-in theme names are available through `Neu_Theme::BuiltInThemeNames()`, and themes can be selected by name through `Neu_Theme::BuiltInThemeByName("Win11")`. Stage2 includes Windows-like Win95, WinXP, Win10, and Win11 color schemes plus many additional Linux/desktop palettes.
-
-
-The Stage2 focused Linux/Windows test applications are:
-
-```sh
-./build/neutrino_test_13_swing_swt_controls
-./build/neutrino_test_14_label_offsets_themes
-./build/neutrino_test_15_selection_controls
-./build/neutrino_test_16_value_controls
-./build/neutrino_test_17_tabs_toolbar_splitter
-./build/neutrino_test_18_stage2_scroll_controls
-```
-
-The Visual Studio 2022 solution includes matching projects:
-
-- `NeutrinoTest13SwingSwtControls.vcxproj`
-- `NeutrinoTest14LabelOffsetsThemes.vcxproj`
-- `NeutrinoTest15SelectionControls.vcxproj`
-- `NeutrinoTest16ValueControls.vcxproj`
-- `NeutrinoTest17TabsToolbarSplitter.vcxproj`
-- `NeutrinoTest18Stage2ScrollControls.vcxproj`
+See `STAGE2_FIXES.md` for the latest Stage2 fixes covering scroll-window clipping, splitter-pane clipping, header resizing, text caret hit testing, ComboBox/Spinner arrow alignment, and Windows CheckBox/RadioButton smoothing.

@@ -203,6 +203,61 @@ static std::vector<std::string> splitPreserveLinesWin32(const std::string& text)
     return logicalLinesWin32(text);
 }
 
+static size_t lineStartOffsetWin32(const std::string& text, int targetLine)
+{
+    int line = 0;
+    size_t start = 0;
+    for (size_t i = 0; i < text.size() && line < targetLine; ++i) {
+        if (text[i] == '\r') {
+            if (i + 1 < text.size() && text[i + 1] == '\n') {
+                ++i;
+            }
+            start = i + 1;
+            ++line;
+        } else if (text[i] == '\n') {
+            start = i + 1;
+            ++line;
+        }
+    }
+    return std::min(start, text.size());
+}
+
+static size_t lineEndOffsetWin32(const std::string& text, size_t start)
+{
+    size_t end = start;
+    while (end < text.size() && text[end] != '\n' && text[end] != '\r') {
+        ++end;
+    }
+    return end;
+}
+
+static int byteOffsetFromXWin32(HDC hdc, const std::string& text, size_t start, size_t end, int x, bool monospace)
+{
+    size_t cursor = start;
+    for (size_t i = start + 1; i <= end; ++i) {
+        const std::string prefix = text.substr(start, i - start);
+        int width = static_cast<int>(prefix.size()) * (monospace ? 8 : 7);
+        if (hdc) {
+            HFONT font = createTextFont(false, false, false, false, monospace, 0);
+            HGDIOBJ oldFont = SelectObject(hdc, font ? font : uiFont());
+            std::wstring wide = toWide(prefix);
+            SIZE sz{};
+            GetTextExtentPoint32W(hdc, wide.c_str(), static_cast<int>(wide.size()), &sz);
+            width = sz.cx;
+            SelectObject(hdc, oldFont);
+            if (font) {
+                DeleteObject(font);
+            }
+        }
+        if (width <= x) {
+            cursor = i;
+        } else {
+            break;
+        }
+    }
+    return static_cast<int>(cursor);
+}
+
 static int lineHeightForHeadingWin32(int headingLevel)
 {
     if (headingLevel > 0) {
@@ -240,6 +295,123 @@ static RECT safeRectWin32(int left, int top, int right, int bottom)
         bottom = top;
     }
     return RECT{left, top, right, bottom};
+}
+
+static void drawArrowWin32(HDC hdc, int centerX, int centerY, bool up, COLORREF color)
+{
+    POINT points[3]{};
+    if (up) {
+        points[0] = POINT{centerX, centerY - 4};
+        points[1] = POINT{centerX - 5, centerY + 3};
+        points[2] = POINT{centerX + 5, centerY + 3};
+    } else {
+        points[0] = POINT{centerX - 5, centerY - 3};
+        points[1] = POINT{centerX + 5, centerY - 3};
+        points[2] = POINT{centerX, centerY + 4};
+    }
+    HBRUSH brush = CreateSolidBrush(color);
+    HPEN pen = CreatePen(PS_SOLID, 1, color);
+    HGDIOBJ oldBrush = SelectObject(hdc, brush);
+    HGDIOBJ oldPen = SelectObject(hdc, pen);
+    Polygon(hdc, points, 3);
+    SelectObject(hdc, oldPen);
+    SelectObject(hdc, oldBrush);
+    DeleteObject(pen);
+    DeleteObject(brush);
+}
+
+static void drawSupersampledEllipseWin32(HDC hdc, const RECT& dest, COLORREF background, COLORREF fill, COLORREF outline, bool filled)
+{
+    const int w = neuMaxIntWin32(1, static_cast<int>(dest.right - dest.left));
+    const int h = neuMaxIntWin32(1, static_cast<int>(dest.bottom - dest.top));
+    constexpr int scale = 3;
+    HDC mem = CreateCompatibleDC(hdc);
+    HBITMAP bmp = CreateCompatibleBitmap(hdc, w * scale, h * scale);
+    HGDIOBJ oldBmp = SelectObject(mem, bmp);
+    RECT mr{0, 0, w * scale, h * scale};
+    HBRUSH bg = CreateSolidBrush(background);
+    FillRect(mem, &mr, bg);
+    DeleteObject(bg);
+    HPEN pen = CreatePen(PS_SOLID, scale, outline);
+    HBRUSH brush = filled ? CreateSolidBrush(fill) : reinterpret_cast<HBRUSH>(GetStockObject(NULL_BRUSH));
+    HGDIOBJ oldPen = SelectObject(mem, pen);
+    HGDIOBJ oldBrush = SelectObject(mem, brush);
+    Ellipse(mem, scale, scale, w * scale - scale, h * scale - scale);
+    SelectObject(mem, oldBrush);
+    SelectObject(mem, oldPen);
+    DeleteObject(pen);
+    if (filled) {
+        DeleteObject(brush);
+    }
+    int oldMode = SetStretchBltMode(hdc, HALFTONE);
+    SetBrushOrgEx(hdc, 0, 0, nullptr);
+    StretchBlt(hdc, dest.left, dest.top, w, h, mem, 0, 0, w * scale, h * scale, SRCCOPY);
+    SetStretchBltMode(hdc, oldMode);
+    SelectObject(mem, oldBmp);
+    DeleteObject(bmp);
+    DeleteDC(mem);
+}
+
+static void drawSupersampledRoundRectWin32(HDC hdc, const RECT& dest, int radius, COLORREF background, COLORREF fill, COLORREF outline, bool filled)
+{
+    const int w = neuMaxIntWin32(1, static_cast<int>(dest.right - dest.left));
+    const int h = neuMaxIntWin32(1, static_cast<int>(dest.bottom - dest.top));
+    constexpr int scale = 3;
+    HDC mem = CreateCompatibleDC(hdc);
+    HBITMAP bmp = CreateCompatibleBitmap(hdc, w * scale, h * scale);
+    HGDIOBJ oldBmp = SelectObject(mem, bmp);
+    RECT mr{0, 0, w * scale, h * scale};
+    HBRUSH bg = CreateSolidBrush(background);
+    FillRect(mem, &mr, bg);
+    DeleteObject(bg);
+    HPEN pen = CreatePen(PS_SOLID, scale, outline);
+    HBRUSH brush = filled ? CreateSolidBrush(fill) : reinterpret_cast<HBRUSH>(GetStockObject(NULL_BRUSH));
+    HGDIOBJ oldPen = SelectObject(mem, pen);
+    HGDIOBJ oldBrush = SelectObject(mem, brush);
+    RoundRect(mem, scale, scale, w * scale - scale, h * scale - scale, radius * scale * 2, radius * scale * 2);
+    SelectObject(mem, oldBrush);
+    SelectObject(mem, oldPen);
+    DeleteObject(pen);
+    if (filled) {
+        DeleteObject(brush);
+    }
+    int oldMode = SetStretchBltMode(hdc, HALFTONE);
+    SetBrushOrgEx(hdc, 0, 0, nullptr);
+    StretchBlt(hdc, dest.left, dest.top, w, h, mem, 0, 0, w * scale, h * scale, SRCCOPY);
+    SetStretchBltMode(hdc, oldMode);
+    SelectObject(mem, oldBmp);
+    DeleteObject(bmp);
+    DeleteDC(mem);
+}
+
+static RECT insetRectWin32(const Neu_Rect& r, int left, int top, int right, int bottom)
+{
+    return safeRectWin32(r.x + left, r.y + top, r.x + r.width - right, r.y + r.height - bottom);
+}
+
+static void drawCenteredTriangleWin32(HDC hdc, COLORREF color, int cx, int cy, bool up)
+{
+    POINT pts[3]{};
+    const int halfWidth = 4;
+    const int halfHeight = 3;
+    if (up) {
+        pts[0] = POINT{cx, cy - halfHeight};
+        pts[1] = POINT{cx - halfWidth, cy + halfHeight};
+        pts[2] = POINT{cx + halfWidth, cy + halfHeight};
+    } else {
+        pts[0] = POINT{cx - halfWidth, cy - halfHeight};
+        pts[1] = POINT{cx + halfWidth, cy - halfHeight};
+        pts[2] = POINT{cx, cy + halfHeight};
+    }
+    HBRUSH brush = CreateSolidBrush(color);
+    HPEN pen = CreatePen(PS_SOLID, 1, color);
+    HGDIOBJ oldBrush = SelectObject(hdc, brush);
+    HGDIOBJ oldPen = SelectObject(hdc, pen);
+    Polygon(hdc, pts, 3);
+    SelectObject(hdc, oldPen);
+    SelectObject(hdc, oldBrush);
+    DeleteObject(pen);
+    DeleteObject(brush);
 }
 
 static void fillRound(HDC hdc, const Neu_Rect& r, int radius, COLORREF fill, COLORREF border)
@@ -1603,6 +1775,32 @@ void Neu_Multilinetextbox::draw(Display* d, Drawable drawable, GC gc, const Neu_
 
 void Neu_Multilinetextbox::handleXEvent(XEvent& ev)
 {
+    if (ev.message == WM_LBUTTONDOWN && contains(ev.x, ev.y)) {
+        Neu_Control::handleXEvent(ev);
+        if (activeScrollDrag_ != 0) {
+            return;
+        }
+
+        Neu_Rect r = bounds();
+        constexpr int lineHeight = 20;
+        const int contentLeft = r.x + 10;
+        const int contentTop = r.y + 8;
+        const int desiredLine = std::max(0, (ev.y - contentTop + scrollY_) / lineHeight);
+        const int localX = ev.x - contentLeft + (wordWrap_ ? 0 : scrollX_);
+        const auto lines = logicalLinesWin32(text_);
+        const int clampedLine = std::min(desiredLine, std::max(0, static_cast<int>(lines.size()) - 1));
+        const size_t start = lineStartOffsetWin32(text_, clampedLine);
+        const size_t end = lineEndOffsetWin32(text_, start);
+
+        HDC hdc = parent_ && parent_->xid() ? GetDC(parent_->xid()) : nullptr;
+        cursor_ = static_cast<size_t>(byteOffsetFromXWin32(hdc, text_, start, end, localX, false));
+        if (hdc) {
+            ReleaseDC(parent_->xid(), hdc);
+        }
+        requestRedraw();
+        return;
+    }
+
     if (focused_ && ev.message == WM_CHAR && (ev.wParam == L'\r' || ev.wParam == L'\n')) {
         const size_t insertAt = std::min(cursor_, text_.size());
         text_.insert(insertAt, 1, '\n');
@@ -1714,12 +1912,133 @@ void Neu_Listbox::handleXEvent(XEvent& ev)
 
 void Neu_ComboBox::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme)
 {
-    Neu_Listbox::draw(d, drawable, gc, theme);
+    Neu_Control::draw(d, drawable, gc, theme);
+    Neu_Rect r = bounds();
+    const int buttonW = 24;
+    const std::string selectedText = selected_ >= 0 && selected_ < static_cast<int>(items_.size())
+                                     ? items_[static_cast<size_t>(selected_)]
+                                     : std::string{};
+    RECT textClip = safeRectWin32(r.x + textOffset_.left + 6,
+                                  r.y + 4,
+                                  r.x + r.width - buttonW - textOffset_.right - 2,
+                                  r.y + r.height - 4);
+    int saved = SaveDC(drawable);
+    IntersectClipRect(drawable, textClip.left, textClip.top, textClip.right, textClip.bottom);
+    const int textWidth = neuMaxIntWin32(1, static_cast<int>(textClip.right - textClip.left) - 2);
+    drawText(d,
+             drawable,
+             gc,
+             theme,
+             truncateTextToWidth(d, drawable, gc, theme, selectedText, textWidth),
+             textClip.left,
+             r.y + std::max(4, (r.height - 16) / 2));
+    RestoreDC(drawable, saved);
+
+    HPEN pen = CreatePen(PS_SOLID, 1, rgb(theme.border));
+    HGDIOBJ oldPen = SelectObject(drawable, pen);
+    const int buttonLeft = r.x + r.width - buttonW;
+    MoveToEx(drawable, buttonLeft, r.y + 4, nullptr);
+    LineTo(drawable, buttonLeft, r.y + r.height - 4);
+    SelectObject(drawable, oldPen);
+    DeleteObject(pen);
+    drawCenteredTriangleWin32(drawable, rgb(theme.text), buttonLeft + buttonW / 2, r.y + r.height / 2, false);
+    drawHintPopup(d, drawable, gc, theme);
 }
 
 void Neu_ComboBox::handleXEvent(XEvent& ev)
 {
-    Neu_Listbox::handleXEvent(ev);
+    Neu_Control::handleXEvent(ev);
+    if (!contains(ev.x, ev.y)) {
+        return;
+    }
+    if (ev.message == WM_MOUSEMOVE) {
+        Neu_Rect r = bounds();
+        hoveredIndex_ = selected_;
+        (void)r;
+        requestRedraw();
+        return;
+    }
+    if (ev.message == WM_LBUTTONUP && !items_.empty()) {
+        if (ctrlDownWin32() && multiSelect_) {
+            if (selected_ >= 0 && selectedIndices_.count(selected_) != 0U) {
+                selectedIndices_.erase(selected_);
+            } else if (selected_ >= 0) {
+                selectedIndices_.insert(selected_);
+            }
+        } else {
+            selected_ = (selected_ + 1) % static_cast<int>(items_.size());
+            selectedIndices_.clear();
+            selectedIndices_.insert(selected_);
+            anchorIndex_ = selected_;
+        }
+        if (callbacks_.onSelectionChanged) {
+            callbacks_.onSelectionChanged(this,
+                                          selected_,
+                                          0,
+                                          items_[static_cast<size_t>(selected_)].c_str(),
+                                          callbacks_.userData);
+        }
+        requestRedraw();
+    }
+}
+
+
+namespace {
+constexpr int kListDefaultColumnWidthWin32 = 120;
+constexpr int kListMinColumnWidthWin32 = 42;
+constexpr int kListRowHeightWin32 = 22;
+
+static Neu_Color darkerWin32(const Neu_Color& color)
+{
+    return Neu_Color{static_cast<uint8_t>(std::max(0, static_cast<int>(color.r) - 32)),
+                     static_cast<uint8_t>(std::max(0, static_cast<int>(color.g) - 32)),
+                     static_cast<uint8_t>(std::max(0, static_cast<int>(color.b) - 32)),
+                     color.a};
+}
+}
+
+void Neu_ListView::setColumnWidths(const std::vector<int>& widths)
+{
+    columnWidths_.clear();
+    columnWidths_.reserve(widths.size());
+    for (int width : widths) {
+        columnWidths_.push_back(std::max(kListMinColumnWidthWin32, width));
+    }
+    requestRedraw();
+}
+
+void Neu_ListView::setColumnWidth(size_t column, int width)
+{
+    if (columnWidths_.size() <= column) {
+        columnWidths_.resize(column + 1, kListDefaultColumnWidthWin32);
+    }
+    columnWidths_[column] = std::max(kListMinColumnWidthWin32, width);
+    requestRedraw();
+}
+
+int Neu_ListView::columnWidth(size_t column) const
+{
+    return effectiveColumnWidth(column, bounds().width);
+}
+
+int Neu_ListView::effectiveColumnWidth(size_t column, int controlWidth) const
+{
+    if (column < columnWidths_.size() && columnWidths_[column] > 0) {
+        return std::max(kListMinColumnWidthWin32, columnWidths_[column]);
+    }
+    if (controlWidth > 0) {
+        return std::max(kListDefaultColumnWidthWin32, std::min(360, (controlWidth - 24) * 6 / 10));
+    }
+    return kListDefaultColumnWidthWin32;
+}
+
+int Neu_ListView::totalColumnWidth(size_t columnCount, int controlWidth) const
+{
+    int total = 0;
+    for (size_t col = 0; col < columnCount; ++col) {
+        total += effectiveColumnWidth(col, controlWidth);
+    }
+    return total;
 }
 
 Neu_TypedValue Neu_ListView::cellValue(size_t r, size_t c) const
@@ -1738,28 +2057,68 @@ void Neu_ListView::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& t
     }
 
     Neu_Rect r = bounds();
-    constexpr int rowHeight = 22;
-    constexpr int columnWidth = 140;
     const int viewportLeft = r.x + 4;
     const int viewportRight = r.x + r.width - 14;
     const int viewportTop = r.y + 4;
     const int viewportBottom = r.y + r.height - 14;
+    const int bodyTop = viewportTop + headerHeight_;
     size_t maxCols = 0;
     for (const auto& row : *model_) {
         maxCols = std::max(maxCols, row.size());
     }
+    const int totalWidth = totalColumnWidth(maxCols, r.width);
+    const int viewportWidth = std::max(1, viewportRight - viewportLeft);
+    const int virtualWidth = totalWidth > viewportWidth ? std::max(r.width + 1, totalWidth + 28) : r.width;
     setAutoScroll(true);
-    setVirtualSize(std::max(r.width, static_cast<int>(maxCols) * columnWidth + 20),
-                   std::max(r.height, static_cast<int>(model_->size()) * rowHeight + 16));
+    setVirtualSize(virtualWidth,
+                   std::max(r.height, headerHeight_ + static_cast<int>(model_->size()) * kListRowHeightWin32 + 16));
 
     int saved = SaveDC(drawable);
     IntersectClipRect(drawable, viewportLeft, viewportTop, viewportRight, viewportBottom);
-    int y = r.y + 20 - scrollY_;
-    for (size_t row = 0; row < model_->size(); ++row, y += rowHeight) {
-        if (y < r.y + 8) {
+
+    RECT header{viewportLeft, viewportTop, viewportRight, bodyTop};
+    HBRUSH headerBrush = CreateSolidBrush(rgb(darkerWin32(theme.glass)));
+    FillRect(drawable, &header, headerBrush);
+    DeleteObject(headerBrush);
+
+    int headerX = r.x + 8 - scrollX_;
+    for (size_t col = 0; col < maxCols; ++col) {
+        const int cw = effectiveColumnWidth(col, r.width);
+        RECT hcell{headerX - 4, viewportTop, headerX + cw - 4, bodyTop};
+        if (hcell.right >= viewportLeft && hcell.left <= viewportRight) {
+            RECT visibleHeader = safeRectWin32(neuMaxIntWin32(static_cast<int>(hcell.left), viewportLeft),
+                                               static_cast<int>(hcell.top),
+                                               neuMinIntWin32(static_cast<int>(hcell.right), viewportRight),
+                                               static_cast<int>(hcell.bottom));
+            FrameRect(drawable, &visibleHeader, reinterpret_cast<HBRUSH>(GetStockObject(GRAY_BRUSH)));
+            int cellSaved = SaveDC(drawable);
+            IntersectClipRect(drawable, visibleHeader.left + 3, visibleHeader.top, visibleHeader.right - 2, visibleHeader.bottom);
+            const std::string title = col == 0 ? "Column 1" : "Column " + std::to_string(col + 1);
+            drawText(d,
+                     drawable,
+                     gc,
+                     theme,
+                     truncateTextToWidth(d, drawable, gc, theme, title, neuMaxIntWin32(1, static_cast<int>(visibleHeader.right - visibleHeader.left) - 8)),
+                     visibleHeader.left + 5,
+                     viewportTop + std::max(4, (headerHeight_ - 16) / 2));
+            RestoreDC(drawable, cellSaved);
+            HPEN pen = CreatePen(PS_SOLID, 1, rgb(theme.accent));
+            HGDIOBJ oldPen = SelectObject(drawable, pen);
+            MoveToEx(drawable, hcell.right, viewportTop + 3, nullptr);
+            LineTo(drawable, hcell.right, bodyTop - 3);
+            SelectObject(drawable, oldPen);
+            DeleteObject(pen);
+        }
+        headerX += cw;
+    }
+
+    IntersectClipRect(drawable, viewportLeft, bodyTop, viewportRight, viewportBottom);
+    int y = bodyTop + kListRowHeightWin32 - 5 - scrollY_;
+    for (size_t row = 0; row < model_->size(); ++row, y += kListRowHeightWin32) {
+        if (y < bodyTop + 8) {
             continue;
         }
-        if (y >= r.y + r.height - 8) {
+        if (y >= viewportBottom) {
             break;
         }
         const bool rowSelected = multiSelect_ ? selectedRows_.count(static_cast<int>(row)) != 0U : static_cast<int>(row) == selectedRow_;
@@ -1771,16 +2130,18 @@ void Neu_ListView::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& t
             DeleteObject(b);
         }
         int x = r.x + 10 - scrollX_;
-        for (size_t col = 0; col < (*model_)[row].size(); ++col, x += columnWidth) {
-            if (x + columnWidth < viewportLeft) {
+        for (size_t col = 0; col < (*model_)[row].size(); ++col) {
+            const int cw = effectiveColumnWidth(col, r.width);
+            if (x + cw < viewportLeft) {
+                x += cw;
                 continue;
             }
             if (x >= viewportRight) {
                 break;
             }
-            RECT cell{x - 3, y - 18, x + columnWidth - 4, y + 3};
+            RECT cell{x - 3, y - 18, x + cw - 4, y + 3};
             const int clippedCellLeft = neuMaxIntWin32(static_cast<int>(cell.left), viewportLeft);
-            const int clippedCellTop = neuMaxIntWin32(static_cast<int>(cell.top), viewportTop);
+            const int clippedCellTop = neuMaxIntWin32(static_cast<int>(cell.top), bodyTop);
             const int clippedCellRight = neuMinIntWin32(static_cast<int>(cell.right), viewportRight);
             const int clippedCellBottom = neuMinIntWin32(static_cast<int>(cell.bottom), viewportBottom);
             RECT visibleCell = safeRectWin32(clippedCellLeft, clippedCellTop, clippedCellRight, clippedCellBottom);
@@ -1803,6 +2164,7 @@ void Neu_ListView::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& t
                 drawText(d, drawable, gc, theme, cellText, drawX, y - 14);
                 RestoreDC(drawable, cellSaved);
             }
+            x += cw;
         }
     }
     RestoreDC(drawable, saved);
@@ -1812,10 +2174,58 @@ void Neu_ListView::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& t
 
 void Neu_ListView::handleXEvent(XEvent& ev)
 {
-    Neu_Control::handleXEvent(ev);
     if (!model_) {
+        Neu_Control::handleXEvent(ev);
         return;
     }
+
+    Neu_Rect r = bounds();
+    const int viewportTop = r.y + 4;
+    const int bodyTop = viewportTop + headerHeight_;
+    const int viewportRight = r.x + r.width - 14;
+    size_t maxCols = 0;
+    for (const auto& rowData : *model_) {
+        maxCols = std::max(maxCols, rowData.size());
+    }
+
+    if (resizingColumn_ >= 0) {
+        if (ev.message == WM_MOUSEMOVE) {
+            setColumnWidth(static_cast<size_t>(resizingColumn_), resizeStartWidth_ + (ev.x - resizeStartX_));
+            return;
+        }
+        if (ev.message == WM_LBUTTONUP) {
+            resizingColumn_ = -1;
+            requestRedraw();
+            return;
+        }
+    }
+
+    if ((ev.message == WM_LBUTTONDOWN || ev.message == WM_MOUSEMOVE)
+        && contains(ev.x, ev.y)
+        && headerResizable_
+        && ev.y >= viewportTop
+        && ev.y <= bodyTop) {
+        int x = r.x + 10 - scrollX_;
+        for (size_t col = 0; col < maxCols; ++col) {
+            const int cw = effectiveColumnWidth(col, r.width);
+            const int boundary = x + cw - 4;
+            if (std::abs(ev.x - boundary) <= 5 && boundary < viewportRight) {
+                if (ev.message == WM_LBUTTONDOWN) {
+                    resizingColumn_ = static_cast<int>(col);
+                    resizeStartX_ = ev.x;
+                    resizeStartWidth_ = cw;
+                }
+                requestRedraw();
+                return;
+            }
+            x += cw;
+        }
+        if (ev.message == WM_LBUTTONDOWN) {
+            return;
+        }
+    }
+
+    Neu_Control::handleXEvent(ev);
     if (!contains(ev.x, ev.y)) {
         if (ev.message == WM_MOUSELEAVE && (hoveredRow_ != -1 || hoveredCol_ != -1)) {
             hoveredRow_ = -1;
@@ -1825,9 +2235,20 @@ void Neu_ListView::handleXEvent(XEvent& ev)
         return;
     }
 
-    Neu_Rect r = bounds();
-    const int row = (ev.y - r.y + scrollY_) / 22;
-    const int col = (ev.x - r.x - 10 + scrollX_) / 140;
+    int row = -1;
+    int col = -1;
+    if (ev.y >= bodyTop) {
+        row = (ev.y - bodyTop + scrollY_) / kListRowHeightWin32;
+        int x = r.x + 10 - scrollX_;
+        for (size_t c = 0; c < maxCols; ++c) {
+            const int cw = effectiveColumnWidth(c, r.width);
+            if (ev.x >= x - 4 && ev.x < x + cw - 4) {
+                col = static_cast<int>(c);
+                break;
+            }
+            x += cw;
+        }
+    }
     const bool validRow = row >= 0 && row < static_cast<int>(model_->size());
     const bool validCol = validRow && col >= 0 && col < static_cast<int>((*model_)[static_cast<size_t>(row)].size());
 
@@ -1991,27 +2412,63 @@ void Neu_TreeView::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& t
     const auto rows = buildTreeRowsWin(model(), collapsedPaths_);
     Neu_Rect r = bounds();
     constexpr int rowHeight = 22;
-    int maxWidth = r.width;
+    constexpr int headerH = 24;
+    int maxWidth = std::max(r.width, treeColumnWidth_ + 24);
     for (const auto& row : rows) {
         const int indent = row.depth * 18;
         const std::string label = (row.hasChildren ? (isPathCollapsed(row.path) ? "+ " : "- ") : "  ") + row.label;
-        maxWidth = std::max(maxWidth, indent + measureTextWidth(d, drawable, gc, theme, label) + 36);
+        maxWidth = std::max(maxWidth, indent + measureTextWidth(d, drawable, gc, theme, label) + 56);
     }
+    treeColumnWidth_ = std::max(96, std::min(std::max(maxWidth, treeColumnWidth_), std::max(180, r.width * 3)));
     setAutoScroll(true);
-    setVirtualSize(std::max(r.width, maxWidth), std::max(r.height, static_cast<int>(rows.size()) * rowHeight + 16));
+    setVirtualSize(std::max(r.width, std::max(maxWidth, treeColumnWidth_ + 28)),
+                   std::max(r.height, headerH + static_cast<int>(rows.size()) * rowHeight + 18));
 
     const int viewportLeft = r.x + 4;
     const int viewportRight = r.x + r.width - 14;
     const int viewportTop = r.y + 4;
     const int viewportBottom = r.y + r.height - 14;
+    const int bodyTop = viewportTop + headerH;
     int saved = SaveDC(drawable);
     IntersectClipRect(drawable, viewportLeft, viewportTop, viewportRight, viewportBottom);
-    int y = r.y + 20 - scrollY_;
+
+    RECT header{viewportLeft, viewportTop, viewportRight, bodyTop};
+    HBRUSH headerBrush = CreateSolidBrush(rgb(darkerWin32(theme.glass)));
+    FillRect(drawable, &header, headerBrush);
+    DeleteObject(headerBrush);
+
+    const int headerX = r.x + 8 - scrollX_;
+    const int headerRight = headerX + treeColumnWidth_;
+    RECT visibleHeader = safeRectWin32(neuMaxIntWin32(headerX - 4, viewportLeft),
+                                       viewportTop,
+                                       neuMinIntWin32(headerRight, viewportRight),
+                                       bodyTop);
+    FrameRect(drawable, &visibleHeader, reinterpret_cast<HBRUSH>(GetStockObject(GRAY_BRUSH)));
+    int headerSaved = SaveDC(drawable);
+    IntersectClipRect(drawable, visibleHeader.left + 4, visibleHeader.top, visibleHeader.right - 2, visibleHeader.bottom);
+    drawText(d,
+             drawable,
+             gc,
+             theme,
+             truncateTextToWidth(d, drawable, gc, theme, "Tree", neuMaxIntWin32(1, static_cast<int>(visibleHeader.right - visibleHeader.left) - 8)),
+             visibleHeader.left + 5,
+             viewportTop + std::max(4, (headerH - 16) / 2));
+    RestoreDC(drawable, headerSaved);
+    HPEN headerPen = CreatePen(PS_SOLID, 1, rgb(theme.accent));
+    HGDIOBJ oldHeaderPen = SelectObject(drawable, headerPen);
+    const int boundaryX = std::min(viewportRight - 1, headerRight - 1);
+    MoveToEx(drawable, boundaryX, viewportTop + 3, nullptr);
+    LineTo(drawable, boundaryX, bodyTop - 3);
+    SelectObject(drawable, oldHeaderPen);
+    DeleteObject(headerPen);
+
+    IntersectClipRect(drawable, viewportLeft, bodyTop, viewportRight, viewportBottom);
+    int y = bodyTop + rowHeight - 5 - scrollY_;
     for (size_t i = 0; i < rows.size(); ++i, y += rowHeight) {
-        if (y < r.y + 8) {
+        if (y < bodyTop + 8) {
             continue;
         }
-        if (y >= r.y + r.height - 8) {
+        if (y >= viewportBottom) {
             break;
         }
         const bool selected = multiSelect_ ? selectedVisibleRows_.count(static_cast<int>(i)) != 0U : static_cast<int>(i) == selectedVisibleRow_;
@@ -2025,11 +2482,15 @@ void Neu_TreeView::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& t
         const auto& row = rows[i];
         const int indent = row.depth * 18;
         const int textX = r.x + 10 + indent - scrollX_;
+        const int columnRight = r.x + 8 + treeColumnWidth_ - scrollX_;
         const std::string label = (row.hasChildren ? (isPathCollapsed(row.path) ? "+ " : "- ") : "  ") + row.label;
-        RECT textClip = safeRectWin32(neuMaxIntWin32(textX, viewportLeft), y - 18, viewportRight, y + 3);
+        RECT textClip = safeRectWin32(neuMaxIntWin32(textX, viewportLeft),
+                                      y - 18,
+                                      neuMinIntWin32(columnRight, viewportRight),
+                                      y + 3);
         if (textClip.right > textClip.left + 2) {
             int cellSaved = SaveDC(drawable);
-            const int clipTop = neuMaxIntWin32(static_cast<int>(textClip.top), viewportTop);
+            const int clipTop = neuMaxIntWin32(static_cast<int>(textClip.top), bodyTop);
             const int clipBottom = neuMinIntWin32(static_cast<int>(textClip.bottom), viewportBottom);
             IntersectClipRect(drawable, static_cast<int>(textClip.left), clipTop, static_cast<int>(textClip.right), clipBottom);
             const int drawX = neuMaxIntWin32(textX, static_cast<int>(textClip.left) + 2);
@@ -2051,10 +2512,51 @@ void Neu_TreeView::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& t
 
 void Neu_TreeView::handleXEvent(XEvent& ev)
 {
-    Neu_Control::handleXEvent(ev);
     if (!model()) {
+        Neu_Control::handleXEvent(ev);
         return;
     }
+
+    Neu_Rect r = bounds();
+    constexpr int headerH = 24;
+    constexpr int rowHeight = 22;
+    const int viewportLeft = r.x + 4;
+    const int viewportRight = r.x + r.width - 14;
+    const int viewportTop = r.y + 4;
+    const int bodyTop = viewportTop + headerH;
+
+    if (headerResizeActive_) {
+        if (ev.message == WM_MOUSEMOVE) {
+            setTreeColumnWidth(headerResizeStartWidth_ + ev.x - headerResizeStartX_);
+            return;
+        }
+        if (ev.message == WM_LBUTTONUP) {
+            headerResizeActive_ = false;
+            requestRedraw();
+            return;
+        }
+    }
+
+    if ((ev.message == WM_LBUTTONDOWN || ev.message == WM_MOUSEMOVE)
+        && contains(ev.x, ev.y)
+        && ev.y >= viewportTop
+        && ev.y <= bodyTop) {
+        const int boundaryX = r.x + 8 + treeColumnWidth_ - scrollX_;
+        if (std::abs(ev.x - boundaryX) <= 6 && boundaryX < viewportRight) {
+            if (ev.message == WM_LBUTTONDOWN) {
+                headerResizeActive_ = true;
+                headerResizeStartX_ = ev.x;
+                headerResizeStartWidth_ = treeColumnWidth_;
+            }
+            requestRedraw();
+            return;
+        }
+        if (ev.message == WM_LBUTTONDOWN) {
+            return;
+        }
+    }
+
+    Neu_Control::handleXEvent(ev);
     if (!contains(ev.x, ev.y)) {
         if (ev.message == WM_MOUSELEAVE && hoveredVisibleRow_ != -1) {
             hoveredVisibleRow_ = -1;
@@ -2063,8 +2565,11 @@ void Neu_TreeView::handleXEvent(XEvent& ev)
         return;
     }
 
-    Neu_Rect r = bounds();
-    const int rowIndex = (ev.y - r.y + scrollY_) / 22;
+    if (ev.x >= r.x + r.width - 14 || ev.y >= r.y + r.height - 14 || ev.y < bodyTop) {
+        return;
+    }
+
+    const int rowIndex = (ev.y - bodyTop + scrollY_) / rowHeight;
     const auto rows = buildTreeRowsWin(model(), collapsedPaths_);
     const bool validRow = rowIndex >= 0 && rowIndex < static_cast<int>(rows.size());
 
@@ -2212,6 +2717,21 @@ void Neu_ScrollBar::handleXEvent(XEvent& ev)
     Neu_Control::handleXEvent(ev);
 }
 
+void Neu_ScrollWindow::add(std::shared_ptr<Neu_Control> child)
+{
+    if (!child) {
+        return;
+    }
+    Neu_Layout childLayout = child->layout();
+    const Neu_Rect r = bounds();
+    if (childLayout.left >= r.x && childLayout.top >= r.y) {
+        childLayout.left -= r.x;
+        childLayout.top -= r.y;
+        child->setLayout(childLayout);
+    }
+    Neu_Placement::add(child);
+}
+
 void Neu_ScrollWindow::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme)
 {
     Neu_Control::draw(d, drawable, gc, theme);
@@ -2220,16 +2740,19 @@ void Neu_ScrollWindow::draw(Display* d, Drawable drawable, GC gc, const Neu_Them
     const int viewportTop = r.y + 4;
     const int viewportRight = r.x + r.width - 14;
     const int viewportBottom = r.y + r.height - 14;
+    const int viewportWidth = std::max(1, viewportRight - viewportLeft);
+    const int viewportHeight = std::max(1, viewportBottom - viewportTop);
+
     int saved = SaveDC(drawable);
     IntersectClipRect(drawable, viewportLeft, viewportTop, viewportRight, viewportBottom);
-    int maxRight = r.width;
-    int maxBottom = r.height;
+    int maxRight = viewportWidth;
+    int maxBottom = viewportHeight;
     for (const auto& child : children()) {
         if (child && child->visible()) {
             Neu_Layout original = child->layout();
             Neu_Layout shifted = original;
-            shifted.left -= scrollX();
-            shifted.top -= scrollY();
+            shifted.left = viewportLeft + original.left - scrollX();
+            shifted.top = viewportTop + original.top - scrollY();
             child->setLayout(shifted);
             Neu_Rect cr = child->bounds();
             const bool intersects = cr.x + cr.width >= viewportLeft
@@ -2241,10 +2764,9 @@ void Neu_ScrollWindow::draw(Display* d, Drawable drawable, GC gc, const Neu_Them
                 IntersectClipRect(drawable, viewportLeft, viewportTop, viewportRight, viewportBottom);
                 child->draw(d, drawable, gc, theme);
                 RestoreDC(drawable, childSaved);
-                IntersectClipRect(drawable, viewportLeft, viewportTop, viewportRight, viewportBottom);
             }
-            maxRight = std::max(maxRight, original.left - r.x + original.width + 20);
-            maxBottom = std::max(maxBottom, original.top - r.y + original.height + 20);
+            maxRight = std::max(maxRight, original.left + original.width + 20);
+            maxBottom = std::max(maxBottom, original.top + original.height + 20);
             child->setLayout(original);
         }
     }
@@ -2263,10 +2785,20 @@ void Neu_ScrollWindow::handleXEvent(XEvent& ev)
         return;
     }
 
+    Neu_Rect r = bounds();
+    const int viewportLeft = r.x + 4;
+    const int viewportTop = r.y + 4;
+    const int viewportRight = r.x + r.width - 14;
+    const int viewportBottom = r.y + r.height - 14;
+    if ((ev.message == WM_MOUSEMOVE || ev.message == WM_LBUTTONDOWN || ev.message == WM_LBUTTONUP)
+        && (ev.x < viewportLeft || ev.x > viewportRight || ev.y < viewportTop || ev.y > viewportBottom)) {
+        return;
+    }
+
     XEvent adjusted = ev;
     if (ev.message == WM_MOUSEMOVE || ev.message == WM_LBUTTONDOWN || ev.message == WM_LBUTTONUP) {
-        adjusted.x += scrollX();
-        adjusted.y += scrollY();
+        adjusted.x = ev.x - viewportLeft + scrollX();
+        adjusted.y = ev.y - viewportTop + scrollY();
         for (auto it = children().rbegin(); it != children().rend(); ++it) {
             auto& child = *it;
             if (child && child->visible() && child->enabled() && child->contains(adjusted.x, adjusted.y)) {
@@ -2522,11 +3054,40 @@ void Neu_RichTextCode::draw(Display* d, Drawable drawable, GC gc, const Neu_Them
 
 void Neu_RichTextCode::handleXEvent(XEvent& ev)
 {
-    if (!readOnly_) {
-        Neu_Multilinetextbox::handleXEvent(ev);
-    } else {
+    if (readOnly_) {
         Neu_Control::handleXEvent(ev);
+        return;
     }
+
+    if (ev.message == WM_LBUTTONDOWN && contains(ev.x, ev.y)) {
+        Neu_Control::handleXEvent(ev);
+        if (activeScrollDrag_ != 0) {
+            return;
+        }
+        Neu_Rect r = bounds();
+        const int toolbarH = toolbarVisible_ ? 34 : 0;
+        constexpr int lineHeight = 20;
+        const int contentLeft = r.x + 56;
+        const int contentTop = r.y + toolbarH + 4;
+        const int contentBottom = r.y + r.height - 14;
+        if (ev.y >= contentTop && ev.y <= contentBottom) {
+            const int desiredLine = std::max(0, (ev.y - (contentTop + 2) + scrollY_) / lineHeight);
+            const auto lines = logicalLinesWin32(text_);
+            const int clampedLine = std::min(desiredLine, std::max(0, static_cast<int>(lines.size()) - 1));
+            const size_t start = lineStartOffsetWin32(text_, clampedLine);
+            const size_t end = lineEndOffsetWin32(text_, start);
+            const int localX = ev.x - contentLeft + (wordWrap_ ? 0 : scrollX_);
+            HDC hdc = parent_ && parent_->xid() ? GetDC(parent_->xid()) : nullptr;
+            cursor_ = static_cast<size_t>(byteOffsetFromXWin32(hdc, text_, start, end, localX, true));
+            if (hdc) {
+                ReleaseDC(parent_->xid(), hdc);
+            }
+            requestRedraw();
+            return;
+        }
+    }
+
+    Neu_Multilinetextbox::handleXEvent(ev);
 }
 
 void Neu_ProgressSquare::setProgress(float progress)
@@ -2711,18 +3272,34 @@ void Neu_CheckBox::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& t
 
     const int box = std::max(12, std::min(18, r.height - 8));
     RECT cb{r.x + 4, r.y + (r.height - box) / 2, r.x + 4 + box, r.y + (r.height - box) / 2 + box};
-    FrameRect(drawable, &cb, reinterpret_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)));
+    drawSupersampledRoundRectWin32(drawable,
+                                   cb,
+                                   4,
+                                   rgb(hover_ ? theme.hover : theme.background),
+                                   rgb(theme.glass),
+                                   rgb(focused_ ? theme.accent : theme.border),
+                                   true);
     if (checked_) {
         HPEN pen = CreatePen(PS_SOLID, 2, rgb(theme.accent));
         HGDIOBJ old = SelectObject(drawable, pen);
+        SetBkMode(drawable, TRANSPARENT);
         MoveToEx(drawable, cb.left + 3, cb.top + box / 2, nullptr);
         LineTo(drawable, cb.left + box / 2, cb.bottom - 3);
         LineTo(drawable, cb.right - 3, cb.top + 3);
+        MoveToEx(drawable, cb.left + 3, cb.top + box / 2 + 1, nullptr);
+        LineTo(drawable, cb.left + box / 2, cb.bottom - 2);
         SelectObject(drawable, old);
         DeleteObject(pen);
     }
     const int left = cb.right + 7 + textOffset_.left;
-    drawPlainTextWin(drawable, theme, text_, left, r.y + textOffset_.top + std::max(0, (r.height - 16) / 2), r.x + r.width - textOffset_.right, r.y + r.height - textOffset_.bottom, rgb(theme.text));
+    drawPlainTextWin(drawable,
+                     theme,
+                     text_,
+                     left,
+                     r.y + textOffset_.top + std::max(0, (r.height - 16) / 2),
+                     r.x + r.width - textOffset_.right,
+                     r.y + r.height - textOffset_.bottom,
+                     rgb(theme.text));
     drawHintPopup(d, drawable, gc, theme);
 }
 
@@ -2748,22 +3325,26 @@ void Neu_RadioButton::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme
     const int box = std::max(12, std::min(18, r.height - 8));
     const int x = r.x + 4;
     const int y = r.y + (r.height - box) / 2;
-    HPEN pen = CreatePen(PS_SOLID, 1, rgb(theme.border));
-    HGDIOBJ oldPen = SelectObject(drawable, pen);
-    HGDIOBJ oldBrush = SelectObject(drawable, GetStockObject(NULL_BRUSH));
-    Ellipse(drawable, x, y, x + box, y + box);
-    SelectObject(drawable, oldBrush);
-    SelectObject(drawable, oldPen);
-    DeleteObject(pen);
+    RECT outer{x, y, x + box, y + box};
+    drawSupersampledEllipseWin32(drawable,
+                                 outer,
+                                 rgb(hover_ ? theme.hover : theme.background),
+                                 rgb(theme.glass),
+                                 rgb(focused_ ? theme.accent : theme.border),
+                                 true);
     if (checked_) {
-        HBRUSH dot = CreateSolidBrush(rgb(theme.accent));
-        HGDIOBJ old = SelectObject(drawable, dot);
-        Ellipse(drawable, x + 4, y + 4, x + box - 4, y + box - 4);
-        SelectObject(drawable, old);
-        DeleteObject(dot);
+        RECT dot{x + 4, y + 4, x + box - 4, y + box - 4};
+        drawSupersampledEllipseWin32(drawable, dot, rgb(theme.glass), rgb(theme.accent), rgb(theme.accent), true);
     }
     const int left = x + box + 7 + textOffset_.left;
-    drawPlainTextWin(drawable, theme, text_, left, r.y + textOffset_.top + std::max(0, (r.height - 16) / 2), r.x + r.width - textOffset_.right, r.y + r.height - textOffset_.bottom, rgb(theme.text));
+    drawPlainTextWin(drawable,
+                     theme,
+                     text_,
+                     left,
+                     r.y + textOffset_.top + std::max(0, (r.height - 16) / 2),
+                     r.x + r.width - textOffset_.right,
+                     r.y + r.height - textOffset_.bottom,
+                     rgb(theme.text));
     drawHintPopup(d, drawable, gc, theme);
 }
 
@@ -2873,11 +3454,17 @@ void Neu_Spinner::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& th
     Neu_Control::draw(d, drawable, gc, theme);
     Neu_Rect r = bounds();
     const int buttonW = 22;
-    drawPlainTextWin(drawable, theme, text_, r.x + 8 + textOffset_.left, r.y + 4 + textOffset_.top, r.x + r.width - buttonW - textOffset_.right, r.y + r.height - 4 - textOffset_.bottom, rgb(theme.text));
-    MoveToEx(drawable, r.x + r.width - buttonW, r.y + 3, nullptr);
-    LineTo(drawable, r.x + r.width - buttonW, r.y + r.height - 3);
-    drawText(d, drawable, gc, theme, "^", r.x + r.width - 16, r.y + 4);
-    drawText(d, drawable, gc, theme, "v", r.x + r.width - 16, r.y + r.height - 18);
+    const int buttonLeft = r.x + r.width - buttonW;
+    drawPlainTextWin(drawable, theme, text_, r.x + 8 + textOffset_.left, r.y + 4 + textOffset_.top, buttonLeft - textOffset_.right, r.y + r.height - 4 - textOffset_.bottom, rgb(theme.text));
+    HPEN pen = CreatePen(PS_SOLID, 1, rgb(theme.border));
+    HGDIOBJ oldPen = SelectObject(drawable, pen);
+    MoveToEx(drawable, buttonLeft, r.y + 3, nullptr);
+    LineTo(drawable, buttonLeft, r.y + r.height - 3);
+    SelectObject(drawable, oldPen);
+    DeleteObject(pen);
+    const int arrowX = buttonLeft + buttonW / 2;
+    drawArrowWin32(drawable, arrowX, r.y + std::max(8, r.height / 4), true, rgb(theme.text));
+    drawArrowWin32(drawable, arrowX, r.y + r.height - std::max(8, r.height / 4), false, rgb(theme.text));
     drawHintPopup(d, drawable, gc, theme);
 }
 
@@ -3025,26 +3612,64 @@ void Neu_TabView::handleXEvent(XEvent& ev)
 
 void Neu_Splitter::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme)
 {
-    Neu_Placement::draw(d, drawable, gc, theme);
+    Neu_Control::draw(d, drawable, gc, theme);
     Neu_Rect r = bounds();
+    const int split = vertical_ ? std::max(24, std::min(splitPosition_, r.width - 24))
+                                : std::max(24, std::min(splitPosition_, r.height - 24));
+    const int splitAbs = vertical_ ? r.x + split : r.y + split;
+
+    for (auto& child : children()) {
+        if (!child || !child->visible()) {
+            continue;
+        }
+        Neu_Rect cr = child->bounds();
+        int saved = SaveDC(drawable);
+        if (vertical_) {
+            const bool leftPane = cr.x + cr.width / 2 < splitAbs;
+            const int clipLeft = leftPane ? r.x + 2 : splitAbs + 2;
+            const int clipRight = leftPane ? splitAbs - 2 : r.x + r.width - 2;
+            if (clipRight > clipLeft) {
+                IntersectClipRect(drawable, clipLeft, r.y + 2, clipRight, r.y + r.height - 2);
+                child->draw(d, drawable, gc, theme);
+            }
+        } else {
+            const bool topPane = cr.y + cr.height / 2 < splitAbs;
+            const int clipTop = topPane ? r.y + 2 : splitAbs + 2;
+            const int clipBottom = topPane ? splitAbs - 2 : r.y + r.height - 2;
+            if (clipBottom > clipTop) {
+                IntersectClipRect(drawable, r.x + 2, clipTop, r.x + r.width - 2, clipBottom);
+                child->draw(d, drawable, gc, theme);
+            }
+        }
+        RestoreDC(drawable, saved);
+    }
+
     HBRUSH b = CreateSolidBrush(rgb(theme.accent));
     if (vertical_) {
-        const int x = r.x + std::min(splitPosition_, r.width - 4);
-        RECT sr{x - 2, r.y + 4, x + 2, r.y + r.height - 4};
+        RECT sr{splitAbs - 2, r.y + 4, splitAbs + 2, r.y + r.height - 4};
         FillRect(drawable, &sr, b);
     } else {
-        const int y = r.y + std::min(splitPosition_, r.height - 4);
-        RECT sr{r.x + 4, y - 2, r.x + r.width - 4, y + 2};
+        RECT sr{r.x + 4, splitAbs - 2, r.x + r.width - 4, splitAbs + 2};
         FillRect(drawable, &sr, b);
     }
     DeleteObject(b);
+    drawHintPopup(d, drawable, gc, theme);
 }
 
 void Neu_Splitter::handleXEvent(XEvent& ev)
 {
     Neu_Rect r = bounds();
-    if (ev.message == WM_LBUTTONDOWN && contains(ev.x, ev.y)) {
+    const int sash = 5;
+    const int split = vertical_ ? std::max(24, std::min(splitPosition_, r.width - 24))
+                                : std::max(24, std::min(splitPosition_, r.height - 24));
+    const int splitAbs = vertical_ ? r.x + split : r.y + split;
+    const bool onSash = vertical_
+                        ? (ev.x >= splitAbs - sash && ev.x <= splitAbs + sash && ev.y >= r.y && ev.y <= r.y + r.height)
+                        : (ev.y >= splitAbs - sash && ev.y <= splitAbs + sash && ev.x >= r.x && ev.x <= r.x + r.width);
+
+    if (ev.message == WM_LBUTTONDOWN && onSash) {
         dragging_ = true;
+        return;
     }
     if (ev.message == WM_LBUTTONUP) {
         dragging_ = false;
@@ -3053,7 +3678,26 @@ void Neu_Splitter::handleXEvent(XEvent& ev)
         setSplitPosition(vertical_ ? ev.x - r.x : ev.y - r.y);
         return;
     }
-    Neu_Placement::handleXEvent(ev);
+
+    if (ev.message == WM_MOUSEMOVE || ev.message == WM_LBUTTONDOWN || ev.message == WM_LBUTTONUP) {
+        for (auto it = children().rbegin(); it != children().rend(); ++it) {
+            auto& child = *it;
+            if (!child || !child->visible() || !child->enabled()) {
+                continue;
+            }
+            const Neu_Rect cr = child->bounds();
+            const bool firstPane = vertical_ ? (cr.x + cr.width / 2 < splitAbs) : (cr.y + cr.height / 2 < splitAbs);
+            const bool pointInPane = vertical_
+                                     ? (firstPane ? ev.x < splitAbs - sash : ev.x > splitAbs + sash)
+                                     : (firstPane ? ev.y < splitAbs - sash : ev.y > splitAbs + sash);
+            if (pointInPane && child->contains(ev.x, ev.y)) {
+                child->handleXEvent(ev);
+                return;
+            }
+        }
+    }
+
+    Neu_Control::handleXEvent(ev);
 }
 
 
@@ -3267,8 +3911,9 @@ Neu_Control* Neu_Window::hitTest(int x, int y)
         }
 
         if (auto scroll = dynamic_cast<Neu_ScrollWindow*>(control.get())) {
-            const int childX = px + scroll->scrollX();
-            const int childY = py + scroll->scrollY();
+            const auto sr = scroll->bounds();
+            const int childX = px - (sr.x + 4) + scroll->scrollX();
+            const int childY = py - (sr.y + 4) + scroll->scrollY();
             const auto& children = scroll->children();
             for (auto child = children.rbegin(); child != children.rend(); ++child) {
                 Neu_Control* hit = self(self, *child, childX, childY);

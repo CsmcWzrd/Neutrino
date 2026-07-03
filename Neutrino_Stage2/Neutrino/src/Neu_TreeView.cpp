@@ -6,6 +6,10 @@ namespace neutrino {
 
 namespace {
 
+constexpr int kTreeRowHeight = 22;
+constexpr int kTreeHeaderHeight = 24;
+constexpr int kHeaderGrip = 6;
+
 struct TreeRowInfo {
     size_t modelRow{0};
     int depth{0};
@@ -84,6 +88,15 @@ static std::vector<TreeRowInfo> buildRows(const Neu_StringTable* model, const st
                         hasChild.count(pathKey) != 0U});
     }
     return rows;
+}
+
+
+static Neu_Color darkerTreeHeader(const Neu_Color& c)
+{
+    return Neu_Color{static_cast<uint8_t>(std::max(0, static_cast<int>(c.r) - 38)),
+                     static_cast<uint8_t>(std::max(0, static_cast<int>(c.g) - 38)),
+                     static_cast<uint8_t>(std::max(0, static_cast<int>(c.b) - 38)),
+                     c.a};
 }
 
 static void applyVisibleSelection(std::set<int>& rows, int& selected, int& anchor, int row, bool ctrl, bool shift, bool multi)
@@ -173,49 +186,73 @@ void Neu_TreeView::draw(Display* display, Drawable drawable, GC gc, const Neu_Th
     }
 
     const auto rect = bounds();
-    constexpr int rowHeight = 22;
     const auto rows = buildRows(model(), collapsedPaths_);
-    int maxLabelWidth = rect.width;
+    int maxLabelWidth = treeColumnWidth_;
     for (const auto& row : rows) {
-        maxLabelWidth = std::max(maxLabelWidth, row.depth * 18 + measureTextWidth(display, drawable, gc, theme, row.label) + 48);
+        maxLabelWidth = std::max(maxLabelWidth, row.depth * 18 + measureTextWidth(display, drawable, gc, theme, row.label) + 56);
     }
+    treeColumnWidth_ = std::max(96, std::max(treeColumnWidth_, std::min(maxLabelWidth, std::max(180, rect.width * 70 / 100))));
     setAutoScroll(true);
-    setVirtualSize(std::max(rect.width, maxLabelWidth), std::max(rect.height, static_cast<int>(rows.size()) * rowHeight + 12));
+    setVirtualSize(std::max(rect.width, std::max(maxLabelWidth + 40, treeColumnWidth_ + 40)),
+                   std::max(rect.height, kTreeHeaderHeight + static_cast<int>(rows.size()) * kTreeRowHeight + 16));
 
-    XRectangle clip{static_cast<short>(rect.x + 4),
-                    static_cast<short>(rect.y + 4),
-                    static_cast<unsigned short>(std::max(1, rect.width - 16)),
-                    static_cast<unsigned short>(std::max(1, rect.height - 16))};
+    const int viewportLeft = rect.x + 4;
+    const int viewportRight = rect.x + rect.width - 14;
+    const int viewportTop = rect.y + 4;
+    const int viewportBottom = rect.y + rect.height - 14;
+
+    XRectangle clip{static_cast<short>(viewportLeft),
+                    static_cast<short>(viewportTop),
+                    static_cast<unsigned short>(std::max(1, viewportRight - viewportLeft)),
+                    static_cast<unsigned short>(std::max(1, viewportBottom - viewportTop))};
     XSetClipRectangles(display, gc, 0, 0, &clip, 1, Unsorted);
 
-    int y = rect.y + 20 - scrollY();
-    for (size_t index = 0; index < rows.size(); ++index, y += rowHeight) {
-        if (y < rect.y + 8) {
+    const int headerBottom = std::min(viewportBottom, viewportTop + kTreeHeaderHeight);
+    XSetForeground(display, gc, Neu_Pixel(display, darkerTreeHeader(theme.glass)));
+    XFillRectangle(display, drawable, gc, viewportLeft, viewportTop,
+                   static_cast<unsigned int>(std::max(1, viewportRight - viewportLeft)),
+                   static_cast<unsigned int>(std::max(1, headerBottom - viewportTop)));
+    const int headerX = rect.x + 8 - scrollX();
+    const int headerRight = headerX + treeColumnWidth_;
+    XSetForeground(display, gc, Neu_Pixel(display, theme.border));
+    XDrawRectangle(display, drawable, gc, std::max(viewportLeft, headerX - 4), viewportTop,
+                   static_cast<unsigned int>(std::max(1, std::min(viewportRight, headerRight) - std::max(viewportLeft, headerX - 4))),
+                   static_cast<unsigned int>(std::max(1, kTreeHeaderHeight - 1)));
+    XSetForeground(display, gc, Neu_Pixel(display, theme.accent));
+    XDrawLine(display, drawable, gc, std::min(viewportRight - 1, headerRight - 1), viewportTop + 3, std::min(viewportRight - 1, headerRight - 1), headerBottom - 3);
+    drawTextColored(display, drawable, gc, theme, "Tree", std::max(viewportLeft + 4, headerX), viewportTop + kTreeHeaderHeight - 7, theme.text, true);
+
+    int y = rect.y + kTreeHeaderHeight + kTreeRowHeight - scrollY();
+    for (size_t index = 0; index < rows.size(); ++index, y += kTreeRowHeight) {
+        if (y < headerBottom + 2) {
             continue;
         }
-        if (y >= rect.y + rect.height - 6) {
+        if (y >= viewportBottom + kTreeRowHeight) {
             break;
         }
 
         const int visibleIndex = static_cast<int>(index);
         if (selectedVisibleRows_.count(visibleIndex) != 0U || visibleIndex == selectedVisibleRow_ || visibleIndex == hoveredVisibleRow_) {
             XSetForeground(display, gc, Neu_Pixel(display, (selectedVisibleRows_.count(visibleIndex) != 0U || visibleIndex == selectedVisibleRow_) ? theme.pressed : theme.hover));
-            XFillRectangle(display, drawable, gc, rect.x + 4, y - 16, rect.width - 18, rowHeight);
+            XFillRectangle(display, drawable, gc, viewportLeft, y - 16,
+                           static_cast<unsigned int>(std::max(1, viewportRight - viewportLeft)),
+                           static_cast<unsigned int>(kTreeRowHeight));
         }
 
         const auto& row = rows[index];
         const int indent = row.depth * 18;
         const std::string indicator = row.hasChildren ? (isPathCollapsed(row.path) ? "+ " : "- ") : "  ";
         const int textX = rect.x + 8 + indent - scrollX();
-        const int clipLeft = std::max(textX, rect.x + 6);
-        const int clipRight = rect.x + rect.width - 14;
+        const int columnRight = rect.x + 8 + treeColumnWidth_ - scrollX();
+        const int clipLeft = std::max(textX, viewportLeft + 2);
+        const int clipRight = std::min(columnRight, viewportRight - 2);
         if (clipRight <= clipLeft) {
             continue;
         }
         XRectangle textClip{static_cast<short>(clipLeft),
-                            static_cast<short>(rect.y + 4),
+                            static_cast<short>(std::max(y - 18, headerBottom)),
                             static_cast<unsigned short>(std::max(1, clipRight - clipLeft)),
-                            static_cast<unsigned short>(std::max(1, rect.height - 14))};
+                            static_cast<unsigned short>(std::max(1, std::min(y + 4, viewportBottom) - std::max(y - 18, headerBottom)))};
         XSetClipRectangles(display, gc, 0, 0, &textClip, 1, Unsorted);
         const int drawX = std::max(textX, clipLeft + 2);
         const int maxTextWidth = std::max(1, clipRight - drawX - 2);
@@ -235,15 +272,62 @@ void Neu_TreeView::draw(Display* display, Drawable drawable, GC gc, const Neu_Th
 
 void Neu_TreeView::handleXEvent(XEvent& event)
 {
-    if (event.type == MotionNotify && contains(event.xmotion.x, event.xmotion.y) && model()) {
-        const auto rect = bounds();
-        const int visibleRow = (event.xmotion.y - rect.y + scrollY()) / 22;
-        const auto rows = buildRows(model(), collapsedPaths_);
-        const int validRow = (visibleRow >= 0 && visibleRow < static_cast<int>(rows.size())) ? visibleRow : -1;
-        if (validRow != hoveredVisibleRow_) {
-            hoveredVisibleRow_ = validRow;
+    if (event.type == MotionNotify && headerResizeActive_) {
+        setTreeColumnWidth(headerResizeStartWidth_ + event.xmotion.x - headerResizeStartX_);
+        return;
+    }
+    if (event.type == ButtonRelease && headerResizeActive_) {
+        headerResizeActive_ = false;
+        return;
+    }
+
+    Neu_Control::handleXEvent(event);
+    if (activeScrollDrag_ != 0 || !model()) {
+        return;
+    }
+
+    const auto rect = bounds();
+    const int viewportLeft = rect.x + 4;
+    const int viewportRight = rect.x + rect.width - 14;
+    const int viewportTop = rect.y + 4;
+    const int viewportBottom = rect.y + rect.height - 14;
+
+    auto mx = [&]() { return event.type == MotionNotify ? event.xmotion.x : event.xbutton.x; };
+    auto my = [&]() { return event.type == MotionNotify ? event.xmotion.y : event.xbutton.y; };
+
+    if ((event.type == ButtonPress || event.type == ButtonRelease || event.type == MotionNotify) && !contains(mx(), my())) {
+        if (hoveredVisibleRow_ != -1) {
+            hoveredVisibleRow_ = -1;
             requestRedraw();
         }
+        return;
+    }
+
+    if (event.type == ButtonPress && event.xbutton.button == Button1) {
+        const int boundaryX = rect.x + 8 + treeColumnWidth_ - scrollX();
+        if (event.xbutton.y >= viewportTop && event.xbutton.y < viewportTop + kTreeHeaderHeight
+            && std::abs(event.xbutton.x - boundaryX) <= kHeaderGrip) {
+            headerResizeActive_ = true;
+            headerResizeStartX_ = event.xbutton.x;
+            headerResizeStartWidth_ = treeColumnWidth_;
+            return;
+        }
+    }
+
+    const auto rows = buildRows(model(), collapsedPaths_);
+    if (event.type == MotionNotify) {
+        if (mx() >= viewportLeft && mx() < viewportRight && my() >= viewportTop + kTreeHeaderHeight && my() < viewportBottom) {
+            const int visibleRow = (my() - (rect.y + kTreeHeaderHeight) + scrollY()) / kTreeRowHeight;
+            const int validRow = (visibleRow >= 0 && visibleRow < static_cast<int>(rows.size())) ? visibleRow : -1;
+            if (validRow != hoveredVisibleRow_) {
+                hoveredVisibleRow_ = validRow;
+                requestRedraw();
+            }
+        } else if (hoveredVisibleRow_ != -1) {
+            hoveredVisibleRow_ = -1;
+            requestRedraw();
+        }
+        return;
     }
 
     if (event.type == LeaveNotify) {
@@ -251,17 +335,16 @@ void Neu_TreeView::handleXEvent(XEvent& event)
             hoveredVisibleRow_ = -1;
             requestRedraw();
         }
+        return;
     }
 
-    if (event.type == ButtonRelease && contains(event.xbutton.x, event.xbutton.y) && model()) {
-        const auto rect = bounds();
-        const int visibleRow = (event.xbutton.y - rect.y + scrollY()) / 22;
-        const auto rows = buildRows(model(), collapsedPaths_);
+    if (event.type == ButtonRelease && event.xbutton.button == Button1) {
+        const int visibleRow = (event.xbutton.y - (rect.y + kTreeHeaderHeight) + scrollY()) / kTreeRowHeight;
 
         if (visibleRow >= 0 && visibleRow < static_cast<int>(rows.size())) {
             const bool ctrl = (event.xbutton.state & ControlMask) != 0U;
             const bool shift = (event.xbutton.state & ShiftMask) != 0U;
-            applyVisibleSelection(selectedVisibleRows_, selectedVisibleRow_, anchorVisibleRow_, visibleRow, ctrl, shift, true);
+            applyVisibleSelection(selectedVisibleRows_, selectedVisibleRow_, anchorVisibleRow_, visibleRow, ctrl, shift, multiSelect_);
             const auto& row = rows[static_cast<size_t>(visibleRow)];
             if (row.hasChildren && !ctrl && !shift) {
                 toggleNodePath(row.path);
@@ -276,8 +359,6 @@ void Neu_TreeView::handleXEvent(XEvent& event)
             requestRedraw();
         }
     }
-
-    Neu_Control::handleXEvent(event);
 }
 
 } // namespace neutrino

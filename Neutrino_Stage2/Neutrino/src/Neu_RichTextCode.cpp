@@ -188,6 +188,48 @@ void Neu_RichTextCode::handleXEvent(XEvent& event)
         Neu_Control::handleXEvent(event);
         return;
     }
+
+    if (!readOnly_ && event.type == ButtonPress && contains(event.xbutton.x, event.xbutton.y)) {
+        const auto rect = bounds();
+        const int toolbarHeight = toolbarVisible_ ? 34 : 0;
+        constexpr int lineHeight = 18;
+        const int contentLeft = rect.x + 56;
+        const int contentTop = rect.y + toolbarHeight + 10;
+        if (event.xbutton.y >= contentTop) {
+            const int lineIndex = std::max(0, (event.xbutton.y - contentTop + scrollY()) / lineHeight);
+            const auto lines = splitPreserveLines(text_);
+            const int clampedLine = std::min(lineIndex, std::max(0, static_cast<int>(lines.size()) - 1));
+            size_t start = 0;
+            for (int i = 0; i < clampedLine && start < text_.size(); ++i) {
+                while (start < text_.size() && text_[start] != '\n' && text_[start] != '\r') {
+                    ++start;
+                }
+                if (start < text_.size() && text_[start] == '\r' && start + 1 < text_.size() && text_[start + 1] == '\n') {
+                    start += 2;
+                } else if (start < text_.size()) {
+                    ++start;
+                }
+            }
+            size_t end = start;
+            while (end < text_.size() && text_[end] != '\n' && text_[end] != '\r') {
+                ++end;
+            }
+            const int localX = event.xbutton.x - contentLeft + (wordWrap_ ? 0 : scrollX());
+            cursor_ = start;
+            for (size_t i = start + 1; i <= end; ++i) {
+                const std::string prefix = text_.substr(start, i - start);
+                if (measureTextWidth(nullptr, 0, 0, Neu_Theme{}, prefix, false, false, true) <= localX) {
+                    cursor_ = i;
+                } else {
+                    break;
+                }
+            }
+            requestRedraw();
+            Neu_Control::handleXEvent(event);
+            return;
+        }
+    }
+
     Neu_Multilinetextbox::handleXEvent(event);
 }
 
