@@ -59,6 +59,65 @@ static size_t lineEndOffset(const std::string& text, size_t start)
     return end;
 }
 
+static int lineIndexForOffset(const std::string& text, size_t offset)
+{
+    offset = std::min(offset, text.size());
+    int line = 0;
+    for (size_t i = 0; i < offset && i < text.size(); ++i) {
+        if (text[i] == '\r') {
+            if (i + 1 < offset && i + 1 < text.size() && text[i + 1] == '\n') {
+                ++i;
+            }
+            ++line;
+        } else if (text[i] == '\n') {
+            ++line;
+        }
+    }
+    return line;
+}
+
+static size_t byteOffsetFromX(const std::string& text, size_t start, size_t end, int x)
+{
+    size_t cursor = start;
+    int width = 0;
+    for (size_t i = start; i < end; ++i) {
+        width += (text[i] == '\t') ? 32 : 8;
+        if (width <= x) {
+            cursor = i + 1;
+        } else {
+            break;
+        }
+    }
+    return cursor;
+}
+
+static int estimatedTextWidth(const std::string& s)
+{
+    int width = 0;
+    for (char ch : s) {
+        width += (ch == '\t') ? 32 : 8;
+    }
+    return width;
+}
+
+static size_t moveVerticallyByLines(const std::string& text, size_t cursor, int deltaLines)
+{
+    if (text.empty()) {
+        return 0;
+    }
+    cursor = std::min(cursor, text.size());
+    const int currentLine = lineIndexForOffset(text, cursor);
+    const size_t currentStart = lineStartOffset(text, currentLine);
+    const std::string currentPrefix = text.substr(currentStart, cursor - currentStart);
+    const int preferredX = estimatedTextWidth(currentPrefix);
+    const auto lines = splitVisualLines(text);
+    const int lastLine = std::max(0, static_cast<int>(lines.size()) - 1);
+    const int targetLine = std::max(0, std::min(lastLine, currentLine + deltaLines));
+    const size_t targetStart = lineStartOffset(text, targetLine);
+    const size_t targetEnd = lineEndOffset(text, targetStart);
+    return byteOffsetFromX(text, targetStart, targetEnd, preferredX);
+}
+
 } // namespace
 
 void Neu_Multilinetextbox::draw(Display* display, Drawable drawable, GC gc, const Neu_Theme& theme)
@@ -98,7 +157,7 @@ void Neu_Multilinetextbox::draw(Display* display, Drawable drawable, GC gc, cons
     size_t lineOffset = 0;
     for (const auto& line : lines) {
         if (y >= rect.y + 12 && y < rect.y + rect.height - 6) {
-            if (focused_ && hasSelection() && !wordWrap_) {
+            if (focused_ && hasSelection()) {
                 const size_t a = selectionStart();
                 const size_t b = selectionEnd();
                 const size_t lineStart = lineOffset;
@@ -253,11 +312,44 @@ void Neu_Multilinetextbox::handleXEvent(XEvent& event)
         return;
     }
 
-    if (focused_ && event.type == KeyPress && XLookupKeysym(&event.xkey, 0) == XK_Return) {
-        replaceSelectionWith("\n");
-        requestRedraw();
-        Neu_Control::handleXEvent(event);
-        return;
+    if (focused_ && event.type == KeyPress) {
+        const KeySym key = XLookupKeysym(&event.xkey, 0);
+        const bool shift = (event.xkey.state & ShiftMask) != 0;
+        const int lineHeight = 18;
+        const auto rect = bounds();
+        const int pageLines = std::max(1, (rect.height - 16) / lineHeight);
+
+        if (key == XK_Up || key == XK_Down || key == XK_Page_Up || key == XK_Page_Down) {
+            int delta = 0;
+            if (key == XK_Up) {
+                delta = -1;
+            } else if (key == XK_Down) {
+                delta = 1;
+            } else if (key == XK_Page_Up) {
+                delta = -pageLines;
+                setScrollOffset(scrollX(), scrollY() - pageLines * lineHeight);
+            } else {
+                delta = pageLines;
+                setScrollOffset(scrollX(), scrollY() + pageLines * lineHeight);
+            }
+            moveCursorWithSelection(moveVerticallyByLines(text_, cursor_, delta), shift);
+            return;
+        }
+
+        if (key == XK_Home || key == XK_End) {
+            const int currentLine = lineIndexForOffset(text_, cursor_);
+            const size_t start = lineStartOffset(text_, currentLine);
+            const size_t end = lineEndOffset(text_, start);
+            moveCursorWithSelection(key == XK_Home ? start : end, shift);
+            return;
+        }
+
+        if (key == XK_Return) {
+            replaceSelectionWith("\n");
+            requestRedraw();
+            Neu_Control::handleXEvent(event);
+            return;
+        }
     }
 
     Neu_Textbox::handleXEvent(event);

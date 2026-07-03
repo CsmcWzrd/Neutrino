@@ -2322,7 +2322,7 @@ void Neu_Multilinetextbox::draw(Display* d, Drawable drawable, GC gc, const Neu_
     size_t lineOffset = 0;
     for (const auto& line : lines) {
         if (y >= r.y + 6 && y < r.y + r.height - 10) {
-            if (focused_ && hasSelection() && !wordWrap_) {
+            if (focused_ && hasSelection()) {
                 const size_t a = selectionStart();
                 const size_t b = selectionEnd();
                 const size_t lineStart = lineOffset;
@@ -2443,6 +2443,26 @@ void Neu_Multilinetextbox::handleXEvent(XEvent& ev)
         size_t lineStart = 0;
         caretLinePrefixWin32(text_, std::min(cursor_, text_.size()), lineIndex, lineStart);
         const size_t lineEnd = lineEndOffsetWin32(text_, lineStart);
+        if (ev.wParam == VK_UP || ev.wParam == VK_DOWN) {
+            HDC hdc = parent_ && parent_->xid() ? GetDC(parent_->xid()) : nullptr;
+            const std::string currentPrefix = text_.substr(lineStart, std::min(cursor_, text_.size()) - lineStart);
+            const int preferredX = hdc ? textWidthWin32(hdc, currentPrefix, false) : static_cast<int>(currentPrefix.size()) * 8;
+            if (hdc) {
+                ReleaseDC(parent_->xid(), hdc);
+            }
+            const auto lines = logicalLinesWin32(text_);
+            int targetLine = static_cast<int>(lineIndex) + (ev.wParam == VK_UP ? -1 : 1);
+            targetLine = std::max(0, std::min(targetLine, std::max(0, static_cast<int>(lines.size()) - 1)));
+            const size_t targetStart = lineStartOffsetWin32(text_, targetLine);
+            const size_t targetEnd = lineEndOffsetWin32(text_, targetStart);
+            HDC hdc2 = parent_ && parent_->xid() ? GetDC(parent_->xid()) : nullptr;
+            const size_t target = static_cast<size_t>(byteOffsetFromXWin32(hdc2, text_, targetStart, targetEnd, preferredX, false));
+            if (hdc2) {
+                ReleaseDC(parent_->xid(), hdc2);
+            }
+            moveCursorWithSelection(target, shift);
+            return;
+        }
         if (ev.wParam == VK_HOME) {
             moveCursorWithSelection(lineStart, shift);
             return;
@@ -3928,7 +3948,7 @@ void Neu_RichTextCode::draw(Display* d, Drawable drawable, GC gc, const Neu_Them
                     FillRect(drawable, &hr, hb);
                     DeleteObject(hb);
                 }
-                if (!fragment && focused_ && hasSelection() && !wordWrap_) {
+                if (focused_ && hasSelection() && lineEndOffset > lineStartOffset) {
                     const size_t selA = selectionStart();
                     const size_t selB = selectionEnd();
                     if (selB > lineStartOffset && selA < lineEndOffset) {
@@ -3955,12 +3975,25 @@ void Neu_RichTextCode::draw(Display* d, Drawable drawable, GC gc, const Neu_Them
     };
 
     if (!richTextFragments().empty()) {
+        size_t fragmentBase = 0;
         for (const auto& f : richTextFragments()) {
             const auto fragmentLines = logicalLinesWin32(f.text);
             const int lineHeight = lineHeightForHeadingWin32(f.headingLevel);
+            size_t localOffset = 0;
             for (const auto& line : fragmentLines) {
-                drawCodeLine(line, &f, lineHeight, logicalLineNo++, 0, 0);
+                const size_t start = fragmentBase + localOffset;
+                const size_t end = std::min(text_.size(), start + line.size());
+                drawCodeLine(line, &f, lineHeight, logicalLineNo++, start, end);
+                localOffset += line.size();
+                if (localOffset < f.text.size()) {
+                    if (f.text[localOffset] == '\r' && localOffset + 1 < f.text.size() && f.text[localOffset + 1] == '\n') {
+                        localOffset += 2;
+                    } else if (f.text[localOffset] == '\r' || f.text[localOffset] == '\n') {
+                        ++localOffset;
+                    }
+                }
             }
+            fragmentBase += f.text.size();
         }
     } else {
         const auto lines = logicalLinesWin32(text_);
@@ -4041,9 +4074,44 @@ void Neu_RichTextCode::handleXEvent(XEvent& ev)
             if (hdc) {
                 ReleaseDC(parent_->xid(), hdc);
             }
+            mouseSelecting_ = true;
+            mouseSelectAnchor_ = shiftDownWin32() ? selectionStart() : newCursor;
             moveCursorWithSelection(newCursor, shiftDownWin32());
+            if (!shiftDownWin32()) {
+                mouseSelectAnchor_ = newCursor;
+            }
             return;
         }
+    }
+
+    if (ev.message == WM_MOUSEMOVE && mouseSelecting_ && focused_) {
+        Neu_Rect r = bounds();
+        const int toolbarH = toolbarVisible_ ? 34 : 0;
+        constexpr int lineHeight = 20;
+        const int contentLeft = r.x + 56;
+        const int contentTop = r.y + toolbarH + 4;
+        const int desiredLine = std::max(0, (ev.y - (contentTop + 2) + scrollY_) / lineHeight);
+        const auto lines = logicalLinesWin32(text_);
+        const int clampedLine = std::min(desiredLine, std::max(0, static_cast<int>(lines.size()) - 1));
+        const size_t start = lineStartOffsetWin32(text_, clampedLine);
+        const size_t end = lineEndOffsetWin32(text_, start);
+        const int localX = ev.x - contentLeft + (wordWrap_ ? 0 : scrollX_);
+        HDC hdc = parent_ && parent_->xid() ? GetDC(parent_->xid()) : nullptr;
+        const size_t newCursor = static_cast<size_t>(byteOffsetFromXWin32(hdc, text_, start, end, localX, true));
+        if (hdc) {
+            ReleaseDC(parent_->xid(), hdc);
+        }
+        selectionStart_ = mouseSelectAnchor_;
+        selectionEnd_ = newCursor;
+        cursor_ = newCursor;
+        requestRedraw();
+        return;
+    }
+
+    if (ev.message == WM_LBUTTONUP && mouseSelecting_) {
+        mouseSelecting_ = false;
+        requestRedraw();
+        return;
     }
 
     if (focused_ && ev.message == WM_CHAR && ev.wParam == L'\b') {

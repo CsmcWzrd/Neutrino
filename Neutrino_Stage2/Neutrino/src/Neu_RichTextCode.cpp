@@ -215,13 +215,18 @@ void Neu_RichTextCode::draw(Display* display, Drawable drawable, GC gc, const Ne
     XSetClipRectangles(display, gc, 0, 0, &clip, 1, Unsorted);
 
     if (!richTextFragments().empty()) {
+        size_t fragmentBase = 0;
         for (const auto& f : richTextFragments()) {
             const int fh = richLineHeight(f);
             std::vector<std::string> logicalParts = splitPreserveLines(f.text);
+            size_t localOffset = 0;
             for (const auto& logicalPart : logicalParts) {
                 const auto parts = wordWrap_ ? wrapTextToWidth(display, drawable, gc, theme, logicalPart, contentWidth)
                                              : std::vector<std::string>{logicalPart};
+                size_t visualOffset = 0;
                 for (const auto& part : parts) {
+                    const size_t lineStartOffset = fragmentBase + localOffset + visualOffset;
+                    const size_t lineEndOffset = std::min(text_.size(), lineStartOffset + part.size());
                     const std::string visible = wordWrap_ ? part : truncateTextToWidth(display, drawable, gc, theme, part, contentWidth + scrollX());
                     const int w = measureTextWidth(display, drawable, gc, theme, visible, f.bold, f.italic, f.monospace, f.headingLevel);
                     maxWidth = std::max(maxWidth, w + 90);
@@ -229,6 +234,18 @@ void Neu_RichTextCode::draw(Display* display, Drawable drawable, GC gc, const Ne
                         if (f.useBackgroundColor || f.useHighlightColor) {
                             XSetForeground(display, gc, Neu_Pixel(display, f.useHighlightColor ? f.highlightColor : f.backgroundColor));
                             XFillRectangle(display, drawable, gc, contentLeft - scrollX(), y - fh + 5, std::max(1, w), fh);
+                        }
+                        if (focused_ && hasSelection()) {
+                            const size_t selA = selectionStart();
+                            const size_t selB = selectionEnd();
+                            if (selB > lineStartOffset && selA < lineEndOffset) {
+                                const size_t localA = std::max(selA, lineStartOffset) - lineStartOffset;
+                                const size_t localB = std::min(selB, lineEndOffset) - lineStartOffset;
+                                const int sx = contentLeft - scrollX() + measureTextWidth(display, drawable, gc, theme, part.substr(0, std::min(localA, part.size())), f.bold, f.italic, f.monospace, f.headingLevel);
+                                const int ex = contentLeft - scrollX() + measureTextWidth(display, drawable, gc, theme, part.substr(0, std::min(localB, part.size())), f.bold, f.italic, f.monospace, f.headingLevel);
+                                XSetForeground(display, gc, Neu_Pixel(display, theme.highlight));
+                                XFillRectangle(display, drawable, gc, std::min(sx, ex), y - fh + 5, std::max(1, std::abs(ex - sx)), fh);
+                            }
                         }
                         drawTextColored(display,
                                         drawable,
@@ -248,8 +265,18 @@ void Neu_RichTextCode::draw(Display* display, Drawable drawable, GC gc, const Ne
                     }
                     y += fh;
                     naturalHeight += fh;
+                    visualOffset += part.size();
+                }
+                localOffset += logicalPart.size();
+                if (localOffset < f.text.size()) {
+                    if (f.text[localOffset] == '\r' && localOffset + 1 < f.text.size() && f.text[localOffset + 1] == '\n') {
+                        localOffset += 2;
+                    } else if (f.text[localOffset] == '\r' || f.text[localOffset] == '\n') {
+                        ++localOffset;
+                    }
                 }
             }
+            fragmentBase += f.text.size();
         }
     } else {
         const auto sourceLines = splitPreserveLines(text());
@@ -267,7 +294,7 @@ void Neu_RichTextCode::draw(Display* display, Drawable drawable, GC gc, const Ne
                         XSetForeground(display, gc, Neu_Pixel(display, sketchHighlightColor_));
                         XFillRectangle(display, drawable, gc, rect.x + 50, y - 14, rect.width - 64, lineHeight);
                     }
-                    if (focused_ && hasSelection() && !wordWrap_) {
+                    if (focused_ && hasSelection()) {
                         const size_t selA = selectionStart();
                         const size_t selB = selectionEnd();
                         if (selB > lineStartOffset && selA < lineEndOffset) {
@@ -330,6 +357,33 @@ void Neu_RichTextCode::draw(Display* display, Drawable drawable, GC gc, const Ne
         }
     }
 
+
+    if (!richTextFragments().empty() && focused_) {
+        size_t localCursor = std::min(cursor_, text_.size());
+        size_t lineIndex = 0;
+        size_t lineStart = 0;
+        for (size_t i = 0; i < localCursor; ++i) {
+            if (text_[i] == '\r') {
+                if (i + 1 < localCursor && text_[i + 1] == '\n') {
+                    ++i;
+                }
+                ++lineIndex;
+                lineStart = i + 1;
+            } else if (text_[i] == '\n') {
+                ++lineIndex;
+                lineStart = i + 1;
+            }
+        }
+        const size_t colBytes = localCursor >= lineStart ? localCursor - lineStart : 0;
+        std::string prefix = text_.substr(lineStart, colBytes);
+        while (!prefix.empty() && (prefix.back() == '\r' || prefix.back() == '\n')) {
+            prefix.pop_back();
+        }
+        const int caretX = contentLeft - scrollX() + measureTextWidth(display, drawable, gc, theme, prefix, false, false, true);
+        const int caretY = contentTop + static_cast<int>(lineIndex) * lineHeight - scrollY();
+        XSetForeground(display, gc, Neu_Pixel(display, theme.accent));
+        XDrawLine(display, drawable, gc, caretX, caretY, caretX, caretY + lineHeight - 3);
+    }
     XSetClipMask(display, gc, None);
     setAutoScroll(true);
     setVirtualSize(std::max(rect.width, maxWidth), std::max(rect.height, naturalHeight + 20));

@@ -509,3 +509,8 @@ Added full-window test applications for rich text editing and rich text code edi
 - `neutrino_test_21_full_richtext_code_control`
 
 `Alt+Backspace` now performs Undo; redo remains available through `Ctrl+Y` and `Ctrl+Shift+Z`.
+
+
+## Stage2 text navigation and selection update
+
+See `STAGE2_TEXT_NAV_SELECTION_FIXES.md` for the multiline/rich-text cursor movement and selection highlight fix pass.

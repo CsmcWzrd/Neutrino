@@ -74,3 +74,8 @@ Editable text controls now preserve repeated spaces/indentation and support `Ctr
 
 - `neutrino_test_20_full_richtext_control`: full-window rich-text editing, toolbar formatting, selection, clipboard, drag selection, and undo/redo.
 - `neutrino_test_21_full_richtext_code_control`: full-window code-oriented rich text editor with toolbar formatting, code text, selection, clipboard, and undo/redo.
+
+
+## Stage2 text navigation and selection update
+
+See `STAGE2_TEXT_NAV_SELECTION_FIXES.md` for the multiline/rich-text cursor movement and selection highlight fix pass.

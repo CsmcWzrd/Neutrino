@@ -226,3 +226,8 @@ make -j2 build/neutrino_test_20_full_richtext_control build/neutrino_test_21_ful
 cmake --build <build-dir> --target neutrino_test_20_full_richtext_control neutrino_test_21_full_richtext_code_control
 make -f Makefile.autoconf -j2 build-autoconf/neutrino_test_20_full_richtext_control build-autoconf/neutrino_test_21_full_richtext_code_control
 ```
+
+
+## Stage2 text navigation and selection update
+
+See `STAGE2_TEXT_NAV_SELECTION_FIXES.md` for the multiline/rich-text cursor movement and selection highlight fix pass.
