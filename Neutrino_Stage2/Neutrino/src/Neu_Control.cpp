@@ -148,36 +148,35 @@ std::vector<std::string> Neu_Control::wrapTextToWidth(Display* display,
     }
 
     for (const auto& logical : logicalLines(text)) {
-        std::string current;
-        std::string word;
-        std::istringstream input(logical);
-        while (input >> word) {
-            const std::string candidate = current.empty() ? word : current + " " + word;
-            if (!current.empty() && measureTextWidth(display, drawable, gc, theme, candidate) > maxWidth) {
-                wrapped.push_back(current);
-                current.clear();
-            }
+        if (logical.empty()) {
+            wrapped.push_back({});
+            continue;
+        }
 
-            if (measureTextWidth(display, drawable, gc, theme, word) > maxWidth) {
-                std::string part;
-                for (char ch : word) {
-                    const std::string c2 = part + ch;
-                    if (!part.empty() && measureTextWidth(display, drawable, gc, theme, c2) > maxWidth) {
-                        wrapped.push_back(part);
-                        part.clear();
+        std::string current;
+        size_t lastBreak = std::string::npos;
+        for (size_t i = 0; i < logical.size(); ++i) {
+            const char ch = logical[i];
+            const std::string candidate = current + ch;
+            if (!current.empty() && measureTextWidth(display, drawable, gc, theme, candidate) > maxWidth) {
+                if (lastBreak != std::string::npos && lastBreak + 1 < current.size()) {
+                    wrapped.push_back(current.substr(0, lastBreak + 1));
+                    current = current.substr(lastBreak + 1);
+                    lastBreak = std::string::npos;
+                    for (size_t j = 0; j < current.size(); ++j) {
+                        if (current[j] == ' ' || current[j] == '\t') {
+                            lastBreak = j;
+                        }
                     }
-                    part.push_back(ch);
+                } else {
+                    wrapped.push_back(current);
+                    current.clear();
+                    lastBreak = std::string::npos;
                 }
-                if (!part.empty()) {
-                    if (current.empty()) {
-                        current = part;
-                    } else {
-                        wrapped.push_back(current);
-                        current = part;
-                    }
-                }
-            } else {
-                current = current.empty() ? word : current + " " + word;
+            }
+            current.push_back(ch);
+            if (ch == ' ' || ch == '\t') {
+                lastBreak = current.size() - 1;
             }
         }
         wrapped.push_back(current);

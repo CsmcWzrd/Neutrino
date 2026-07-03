@@ -409,6 +409,49 @@ static bool shiftDownWin32()
     return (GetKeyState(VK_SHIFT) & 0x8000) != 0;
 }
 
+
+static void setClipboardTextWin32(const std::string& text)
+{
+    if (!OpenClipboard(nullptr)) {
+        return;
+    }
+    EmptyClipboard();
+    const std::wstring wide = toWide(text);
+    const SIZE_T bytes = (wide.size() + 1) * sizeof(wchar_t);
+    HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, bytes);
+    if (mem) {
+        void* ptr = GlobalLock(mem);
+        if (ptr) {
+            std::memcpy(ptr, wide.c_str(), bytes);
+            GlobalUnlock(mem);
+            SetClipboardData(CF_UNICODETEXT, mem);
+            mem = nullptr;
+        }
+    }
+    if (mem) {
+        GlobalFree(mem);
+    }
+    CloseClipboard();
+}
+
+static std::string getClipboardTextWin32()
+{
+    std::string out;
+    if (!OpenClipboard(nullptr)) {
+        return out;
+    }
+    HANDLE data = GetClipboardData(CF_UNICODETEXT);
+    if (data) {
+        const wchar_t* wide = static_cast<const wchar_t*>(GlobalLock(data));
+        if (wide) {
+            out = utf8FromWide(wide, static_cast<int>(wcslen(wide)));
+            GlobalUnlock(data);
+        }
+    }
+    CloseClipboard();
+    return out;
+}
+
 static int neuMaxIntWin32(int a, int b)
 {
     return a > b ? a : b;
@@ -1413,33 +1456,34 @@ std::vector<std::string> Neu_Control::wrapTextToWidth(Display* d, Drawable drawa
         return wrapped;
     }
     for (const auto& logical : logicalLinesWin32(text)) {
+        if (logical.empty()) {
+            wrapped.push_back({});
+            continue;
+        }
         std::string current;
-        std::string word;
-        std::istringstream input(logical);
-        while (input >> word) {
-            const std::string candidate = current.empty() ? word : current + " " + word;
+        size_t lastBreak = std::string::npos;
+        for (size_t i = 0; i < logical.size(); ++i) {
+            const char ch = logical[i];
+            const std::string candidate = current + ch;
             if (!current.empty() && measureTextWidth(d, drawable, gc, theme, candidate) > maxWidth) {
-                wrapped.push_back(current);
-                current.clear();
+                if (lastBreak != std::string::npos && lastBreak + 1 < current.size()) {
+                    wrapped.push_back(current.substr(0, lastBreak + 1));
+                    current = current.substr(lastBreak + 1);
+                    lastBreak = std::string::npos;
+                    for (size_t j = 0; j < current.size(); ++j) {
+                        if (current[j] == ' ' || current[j] == '\t') {
+                            lastBreak = j;
+                        }
+                    }
+                } else {
+                    wrapped.push_back(current);
+                    current.clear();
+                    lastBreak = std::string::npos;
+                }
             }
-            if (measureTextWidth(d, drawable, gc, theme, word) > maxWidth) {
-                std::string part;
-                for (char ch : word) {
-                    std::string candidatePart = part + ch;
-                    if (!part.empty() && measureTextWidth(d, drawable, gc, theme, candidatePart) > maxWidth) {
-                        wrapped.push_back(part);
-                        part.clear();
-                    }
-                    part.push_back(ch);
-                }
-                if (!part.empty()) {
-                    if (!current.empty()) {
-                        wrapped.push_back(current);
-                    }
-                    current = part;
-                }
-            } else {
-                current = current.empty() ? word : current + " " + word;
+            current.push_back(ch);
+            if (ch == ' ' || ch == '\t') {
+                lastBreak = current.size() - 1;
             }
         }
         wrapped.push_back(current);
@@ -1831,6 +1875,91 @@ void Neu_Button::handleXEvent(XEvent& ev)
     Neu_Control::handleXEvent(ev);
 }
 
+void Neu_Textbox::selectAll()
+{
+    selectionStart_ = 0;
+    selectionEnd_ = text_.size();
+    cursor_ = selectionEnd_;
+    requestRedraw();
+}
+
+void Neu_Textbox::clearSelection()
+{
+    selectionStart_ = cursor_;
+    selectionEnd_ = cursor_;
+    requestRedraw();
+}
+
+void Neu_Textbox::setSelection(size_t start, size_t end)
+{
+    selectionStart_ = std::min(start, text_.size());
+    selectionEnd_ = std::min(end, text_.size());
+    cursor_ = selectionEnd_;
+    requestRedraw();
+}
+
+bool Neu_Textbox::hasSelection() const
+{
+    return selectionStart_ != selectionEnd_;
+}
+
+std::string Neu_Textbox::selectedText() const
+{
+    if (!hasSelection()) {
+        return {};
+    }
+    const size_t a = selectionStart();
+    const size_t b = selectionEnd();
+    return text_.substr(a, b - a);
+}
+
+void Neu_Textbox::deleteSelection()
+{
+    if (!hasSelection()) {
+        return;
+    }
+    const size_t a = selectionStart();
+    const size_t b = selectionEnd();
+    text_.erase(a, b - a);
+    cursor_ = a;
+    selectionStart_ = cursor_;
+    selectionEnd_ = cursor_;
+    invokeTextChanged();
+}
+
+void Neu_Textbox::replaceSelectionWith(const std::string& text)
+{
+    if (hasSelection()) {
+        const size_t a = selectionStart();
+        const size_t b = selectionEnd();
+        text_.replace(a, b - a, text);
+        cursor_ = a + text.size();
+    } else {
+        cursor_ = std::min(cursor_, text_.size());
+        text_.insert(cursor_, text);
+        cursor_ += text.size();
+    }
+    selectionStart_ = cursor_;
+    selectionEnd_ = cursor_;
+    invokeTextChanged();
+}
+
+void Neu_Textbox::moveCursorWithSelection(size_t newCursor, bool extendSelection)
+{
+    newCursor = std::min(newCursor, text_.size());
+    if (extendSelection) {
+        if (!hasSelection()) {
+            selectionStart_ = cursor_;
+        }
+        selectionEnd_ = newCursor;
+    } else {
+        selectionStart_ = newCursor;
+        selectionEnd_ = newCursor;
+    }
+    cursor_ = newCursor;
+    requestRedraw();
+}
+
 void Neu_Textbox::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme)
 {
     Neu_Control::draw(d, drawable, gc, theme);
@@ -1856,6 +1985,16 @@ void Neu_Textbox::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& th
 
     int saved = SaveDC(drawable);
     IntersectClipRect(drawable, r.x + 6, r.y + 4, r.x + r.width - 6, r.y + r.height - 4);
+    if (focused_ && hasSelection()) {
+        const size_t a = selectionStart();
+        const size_t b = selectionEnd();
+        const int sx = textLeft - textScrollX_ + measureTextWidth(d, drawable, gc, theme, text_.substr(0, a));
+        const int ex = textLeft - textScrollX_ + measureTextWidth(d, drawable, gc, theme, text_.substr(0, b));
+        RECT sr{std::min(sx, ex), r.y + 5, std::max(sx, ex), r.y + r.height - 5};
+        HBRUSH sb = CreateSolidBrush(rgb(theme.highlight));
+        FillRect(drawable, &sr, sb);
+        DeleteObject(sb);
+    }
     drawText(d,
              drawable,
              gc,
@@ -1888,7 +2027,7 @@ void Neu_Textbox::handleXEvent(XEvent& ev)
         Neu_Rect r = bounds();
         const int textLeft = r.x + 10;
         const int localX = ev.x - textLeft + textScrollX_;
-        cursor_ = 0;
+        size_t newCursor = 0;
         HDC hdc = parent_ && parent_->xid() ? GetDC(parent_->xid()) : nullptr;
         HGDIOBJ oldFont = nullptr;
         if (hdc) {
@@ -1903,7 +2042,7 @@ void Neu_Textbox::handleXEvent(XEvent& ev)
                 w = sz.cx;
             }
             if (w <= localX) {
-                cursor_ = i;
+                newCursor = i;
             } else {
                 break;
             }
@@ -1914,7 +2053,7 @@ void Neu_Textbox::handleXEvent(XEvent& ev)
             }
             ReleaseDC(parent_->xid(), hdc);
         }
-        requestRedraw();
+        moveCursorWithSelection(newCursor, shiftDownWin32());
         return;
     }
 
@@ -1922,36 +2061,62 @@ void Neu_Textbox::handleXEvent(XEvent& ev)
         return;
     }
 
-    bool changed = false;
     if (ev.message == WM_KEYDOWN) {
+        if (ctrlDownWin32()) {
+            switch (ev.wParam) {
+            case 'A':
+                selectAll();
+                return;
+            case 'C':
+                if (hasSelection()) {
+                    setClipboardTextWin32(selectedText());
+                }
+                return;
+            case 'X':
+                if (hasSelection()) {
+                    setClipboardTextWin32(selectedText());
+                    deleteSelection();
+                    requestRedraw();
+                }
+                return;
+            case 'V': {
+                const std::string clip = getClipboardTextWin32();
+                if (!clip.empty()) {
+                    replaceSelectionWith(clip);
+                    requestRedraw();
+                }
+                return;
+            }
+            default:
+                break;
+            }
+        }
+        const bool shift = shiftDownWin32();
         switch (ev.wParam) {
         case VK_LEFT:
-            if (cursor_ > 0) {
-                --cursor_;
-            }
+            moveCursorWithSelection(cursor_ > 0 ? cursor_ - 1 : 0, shift);
             break;
         case VK_RIGHT:
-            if (cursor_ < text_.size()) {
-                ++cursor_;
-            }
+            moveCursorWithSelection(cursor_ < text_.size() ? cursor_ + 1 : text_.size(), shift);
             break;
         case VK_HOME:
-            cursor_ = 0;
+            moveCursorWithSelection(0, shift);
             break;
         case VK_END:
-            cursor_ = text_.size();
+            moveCursorWithSelection(text_.size(), shift);
             break;
         case VK_DELETE:
-            if (cursor_ < text_.size()) {
+            if (hasSelection()) {
+                deleteSelection();
+            } else if (cursor_ < text_.size()) {
                 text_.erase(cursor_, 1);
+                clearSelection();
                 invokeTextChanged();
-                changed = true;
             }
             break;
         default:
             break;
         }
-        (void)changed;
         requestRedraw();
         return;
     }
@@ -1959,18 +2124,19 @@ void Neu_Textbox::handleXEvent(XEvent& ev)
     if (ev.message == WM_CHAR) {
         wchar_t ch = static_cast<wchar_t>(ev.wParam);
         if (ch == L'\b') {
-            if (cursor_ > 0 && !text_.empty()) {
+            if (hasSelection()) {
+                deleteSelection();
+            } else if (cursor_ > 0 && !text_.empty()) {
                 text_.erase(cursor_ - 1, 1);
                 --cursor_;
+                clearSelection();
                 invokeTextChanged();
             }
         } else if (ch == L'\r' || ch == L'\n') {
             // Single-line text boxes ignore Enter.
         } else if (ch >= 32) {
             const std::string utf8 = utf8FromWide(&ch, 1);
-            text_.insert(cursor_, utf8);
-            cursor_ += utf8.size();
-            invokeTextChanged();
+            replaceSelectionWith(utf8);
         }
         requestRedraw();
     }
@@ -2010,12 +2176,37 @@ void Neu_Multilinetextbox::draw(Display* d, Drawable drawable, GC gc, const Neu_
     int saved = SaveDC(drawable);
     IntersectClipRect(drawable, r.x + 4, r.y + 4, r.x + r.width - 14, r.y + r.height - 14);
     int y = r.y + 8 - scrollY_;
+    size_t lineOffset = 0;
     for (const auto& line : lines) {
         if (y >= r.y + 6 && y < r.y + r.height - 10) {
+            if (focused_ && hasSelection() && !wordWrap_) {
+                const size_t a = selectionStart();
+                const size_t b = selectionEnd();
+                const size_t lineStart = lineOffset;
+                const size_t lineEnd = lineOffset + line.size();
+                if (b > lineStart && a < lineEnd) {
+                    const size_t selA = std::max(a, lineStart) - lineStart;
+                    const size_t selB = std::min(b, lineEnd) - lineStart;
+                    const int sx = r.x + 10 - scrollX_ + measureTextWidth(d, drawable, gc, theme, line.substr(0, selA));
+                    const int ex = r.x + 10 - scrollX_ + measureTextWidth(d, drawable, gc, theme, line.substr(0, selB));
+                    RECT sr{std::min(sx, ex), y - 2, std::max(sx, ex), y + lineHeight - 2};
+                    HBRUSH sb = CreateSolidBrush(rgb(theme.highlight));
+                    FillRect(drawable, &sr, sb);
+                    DeleteObject(sb);
+                }
+            }
             if (wordWrap_) {
                 drawText(d, drawable, gc, theme, truncateTextToWidth(d, drawable, gc, theme, line, contentWidth), r.x + 10, y);
             } else {
                 drawText(d, drawable, gc, theme, line, r.x + 10 - scrollX_, y);
+            }
+        }
+        lineOffset += line.size();
+        if (lineOffset < text_.size()) {
+            if (text_[lineOffset] == '\r' && lineOffset + 1 < text_.size() && text_[lineOffset + 1] == '\n') {
+                lineOffset += 2;
+            } else if (text_[lineOffset] == '\r' || text_[lineOffset] == '\n') {
+                ++lineOffset;
             }
         }
         y += lineHeight;
@@ -2070,19 +2261,16 @@ void Neu_Multilinetextbox::handleXEvent(XEvent& ev)
         const size_t end = lineEndOffsetWin32(text_, start);
 
         HDC hdc = parent_ && parent_->xid() ? GetDC(parent_->xid()) : nullptr;
-        cursor_ = static_cast<size_t>(byteOffsetFromXWin32(hdc, text_, start, end, localX, false));
+        const size_t newCursor = static_cast<size_t>(byteOffsetFromXWin32(hdc, text_, start, end, localX, false));
         if (hdc) {
             ReleaseDC(parent_->xid(), hdc);
         }
-        requestRedraw();
+        moveCursorWithSelection(newCursor, shiftDownWin32());
         return;
     }
 
     if (focused_ && ev.message == WM_CHAR && (ev.wParam == L'\r' || ev.wParam == L'\n')) {
-        const size_t insertAt = std::min(cursor_, text_.size());
-        text_.insert(insertAt, 1, '\n');
-        cursor_ = insertAt + 1;
-        invokeTextChanged();
+        replaceSelectionWith("\n");
         requestRedraw();
         return;
     }
@@ -3455,17 +3643,20 @@ void Neu_RichTextCode::handleXEvent(XEvent& ev)
             const size_t end = lineEndOffsetWin32(text_, start);
             const int localX = ev.x - contentLeft + (wordWrap_ ? 0 : scrollX_);
             HDC hdc = parent_ && parent_->xid() ? GetDC(parent_->xid()) : nullptr;
-            cursor_ = static_cast<size_t>(byteOffsetFromXWin32(hdc, text_, start, end, localX, true));
+            const size_t newCursor = static_cast<size_t>(byteOffsetFromXWin32(hdc, text_, start, end, localX, true));
             if (hdc) {
                 ReleaseDC(parent_->xid(), hdc);
             }
-            requestRedraw();
+            moveCursorWithSelection(newCursor, shiftDownWin32());
             return;
         }
     }
 
     if (focused_ && ev.message == WM_CHAR && ev.wParam == L'\b') {
-        if (cursor_ > 0 && !text_.empty()) {
+        if (hasSelection()) {
+            deleteSelection();
+            requestRedraw();
+        } else if (cursor_ > 0 && !text_.empty()) {
             cursor_ = std::min(cursor_, text_.size());
             size_t eraseAt = cursor_ - 1;
             size_t eraseCount = 1;

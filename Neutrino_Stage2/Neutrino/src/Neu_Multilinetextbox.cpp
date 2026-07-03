@@ -95,10 +95,33 @@ void Neu_Multilinetextbox::draw(Display* display, Drawable drawable, GC gc, cons
     XSetClipRectangles(display, gc, 0, 0, &clip, 1, Unsorted);
 
     int y = contentTop + 12 - scrollY();
+    size_t lineOffset = 0;
     for (const auto& line : lines) {
         if (y >= rect.y + 12 && y < rect.y + rect.height - 6) {
+            if (focused_ && hasSelection() && !wordWrap_) {
+                const size_t a = selectionStart();
+                const size_t b = selectionEnd();
+                const size_t lineStart = lineOffset;
+                const size_t lineEnd = lineOffset + line.size();
+                if (b > lineStart && a < lineEnd) {
+                    const size_t selA = std::max(a, lineStart) - lineStart;
+                    const size_t selB = std::min(b, lineEnd) - lineStart;
+                    const int sx = contentLeft - scrollX() + measureTextWidth(display, drawable, gc, theme, line.substr(0, selA));
+                    const int ex = contentLeft - scrollX() + measureTextWidth(display, drawable, gc, theme, line.substr(0, selB));
+                    XSetForeground(display, gc, Neu_Pixel(display, theme.highlight));
+                    XFillRectangle(display, drawable, gc, std::min(sx, ex), y - lineHeight + 4, std::max(1, std::abs(ex - sx)), lineHeight);
+                }
+            }
             const std::string visible = wordWrap_ ? line : truncateTextToWidth(display, drawable, gc, theme, line, contentWidth + scrollX());
             drawText(display, drawable, gc, theme, visible, contentLeft - (wordWrap_ ? 0 : scrollX()), y);
+        }
+        lineOffset += line.size();
+        if (lineOffset < text_.size()) {
+            if (text_[lineOffset] == '\r' && lineOffset + 1 < text_.size() && text_[lineOffset + 1] == '\n') {
+                lineOffset += 2;
+            } else if (text_[lineOffset] == '\r' || text_[lineOffset] == '\n') {
+                ++lineOffset;
+            }
         }
         y += lineHeight;
     }
@@ -145,25 +168,22 @@ void Neu_Multilinetextbox::handleXEvent(XEvent& event)
         const size_t start = lineStartOffset(text_, clampedLine);
         const size_t end = lineEndOffset(text_, start);
         const int localX = event.xbutton.x - contentLeft + (wordWrap_ ? 0 : scrollX());
-        cursor_ = start;
+        size_t newCursor = start;
         for (size_t i = start + 1; i <= end; ++i) {
             const std::string prefix = text_.substr(start, i - start);
             if (measureTextWidth(nullptr, 0, 0, Neu_Theme{}, prefix) <= localX) {
-                cursor_ = i;
+                newCursor = i;
             } else {
                 break;
             }
         }
-        requestRedraw();
+        moveCursorWithSelection(newCursor, (event.xbutton.state & ShiftMask) != 0);
         Neu_Control::handleXEvent(event);
         return;
     }
 
     if (focused_ && event.type == KeyPress && XLookupKeysym(&event.xkey, 0) == XK_Return) {
-        const size_t insertAt = std::min(cursor_, text_.size());
-        text_.insert(insertAt, 1, '\n');
-        cursor_ = insertAt + 1;
-        invokeTextChanged();
+        replaceSelectionWith("\n");
         requestRedraw();
         Neu_Control::handleXEvent(event);
         return;

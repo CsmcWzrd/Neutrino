@@ -390,9 +390,21 @@ public:
     const char* className() const override { return "Neu_Textbox"; }
     void draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme) override;
     void handleXEvent(XEvent& ev) override;
+    void selectAll();
+    void clearSelection();
+    void setSelection(size_t start, size_t end);
+    bool hasSelection() const;
+    std::string selectedText() const;
+    size_t selectionStart() const { return std::min(selectionStart_, selectionEnd_); }
+    size_t selectionEnd() const { return std::max(selectionStart_, selectionEnd_); }
 protected:
+    void replaceSelectionWith(const std::string& text);
+    void deleteSelection();
+    void moveCursorWithSelection(size_t newCursor, bool extendSelection);
     size_t cursor_{0};
     int textScrollX_{0};
+    size_t selectionStart_{0};
+    size_t selectionEnd_{0};
 };
 
 class Neu_Passwordbox : public Neu_Textbox {

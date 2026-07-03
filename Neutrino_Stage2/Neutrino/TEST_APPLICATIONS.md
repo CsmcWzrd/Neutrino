@@ -64,4 +64,7 @@ cmake --build build-vs2022 --config Release
 ## Visual Studio project settings
 
 Every `msvc/*.vcxproj` file uses Visual Studio 2022 toolset `v143`, C++17 mode via `<LanguageStandard>stdcpp17</LanguageStandard>`, Unicode character set, `/utf-8`, and `_CRT_SECURE_NO_WARNINGS` in both Debug and Release configurations.
+## Stage2 text selection and clipboard fix
+
+Editable text controls now preserve repeated spaces/indentation and support `Ctrl+A`, `Ctrl+C`, `Ctrl+X`, `Ctrl+V`, Shift+arrow selection, and selection-aware Backspace/Delete. See `STAGE2_TEXT_SELECTION_CLIPBOARD_FIXES.md`.
 

@@ -438,3 +438,7 @@ The Stage2 package includes a Windows-focused fix pass for rich-text caret drift
 ## Stage2 combo/font/theme fix pass
 
 This package includes a Stage2 fix pass for ComboBox drop-down behavior, ComboBox drop-down scrollbar rendering, logical font-family aliases (`Sans`, `Serif`, `SansSerif`, `Monospace`), MaterialDark off-white text, Win32 rich-text caret positioning after deletion, and active theme corner geometry for ListView/TableView/TreeView headers plus row/selection highlights.
+## Stage2 text selection and clipboard fix
+
+Editable text controls now preserve repeated spaces/indentation and support `Ctrl+A`, `Ctrl+C`, `Ctrl+X`, `Ctrl+V`, Shift+arrow selection, and selection-aware Backspace/Delete. See `STAGE2_TEXT_SELECTION_CLIPBOARD_FIXES.md`.
+

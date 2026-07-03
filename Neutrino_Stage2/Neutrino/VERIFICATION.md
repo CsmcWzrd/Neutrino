@@ -166,3 +166,7 @@ make -f Makefile.autoconf -j2 build-autoconf/libNeutrino.a     build-autoconf/ne
 ```
 
 The Visual Studio 2022 solution contains matching Stage2 projects and remains configured for standard C++17 and `_CRT_SECURE_NO_WARNINGS`.
+## Stage2 text selection and clipboard fix
+
+Editable text controls now preserve repeated spaces/indentation and support `Ctrl+A`, `Ctrl+C`, `Ctrl+X`, `Ctrl+V`, Shift+arrow selection, and selection-aware Backspace/Delete. See `STAGE2_TEXT_SELECTION_CLIPBOARD_FIXES.md`.
+

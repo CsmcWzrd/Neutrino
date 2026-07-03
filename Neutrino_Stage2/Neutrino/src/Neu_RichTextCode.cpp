@@ -215,16 +215,16 @@ void Neu_RichTextCode::handleXEvent(XEvent& event)
                 ++end;
             }
             const int localX = event.xbutton.x - contentLeft + (wordWrap_ ? 0 : scrollX());
-            cursor_ = start;
+            size_t newCursor = start;
             for (size_t i = start + 1; i <= end; ++i) {
                 const std::string prefix = text_.substr(start, i - start);
                 if (measureTextWidth(nullptr, 0, 0, Neu_Theme{}, prefix, false, false, true) <= localX) {
-                    cursor_ = i;
+                    newCursor = i;
                 } else {
                     break;
                 }
             }
-            requestRedraw();
+            moveCursorWithSelection(newCursor, (event.xbutton.state & ShiftMask) != 0);
             Neu_Control::handleXEvent(event);
             return;
         }
@@ -233,7 +233,10 @@ void Neu_RichTextCode::handleXEvent(XEvent& event)
     if (focused_ && event.type == KeyPress) {
         KeySym sym = XLookupKeysym(&event.xkey, 0);
         if (sym == XK_BackSpace) {
-            if (cursor_ > 0 && !text_.empty()) {
+            if (hasSelection()) {
+                deleteSelection();
+                requestRedraw();
+            } else if (cursor_ > 0 && !text_.empty()) {
                 cursor_ = std::min(cursor_, text_.size());
                 size_t eraseAt = cursor_ - 1;
                 size_t eraseCount = 1;
