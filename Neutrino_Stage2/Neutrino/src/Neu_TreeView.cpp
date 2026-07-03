@@ -6,7 +6,7 @@ namespace neutrino {
 
 namespace {
 
-constexpr int kTreeRowHeight = 22;
+constexpr int kTreeRowHeight = 26;
 constexpr int kTreeHeaderHeight = 24;
 constexpr int kHeaderGrip = 6;
 

@@ -18,7 +18,7 @@ static int Neu_RunWin32Demo()
 
     Neu_Window window(app, 900, 620, "Neutrino Win32 Demo");
     window.create();
-    window.setTheme(Neu_Theme::BlueGlass());
+    window.setTheme(Neu_Theme::MaterialDark());
 
     Neu_Callbacks callbacks;
     callbacks.onClick = on_button;

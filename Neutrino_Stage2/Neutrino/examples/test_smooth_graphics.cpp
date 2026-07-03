@@ -49,7 +49,7 @@ int main() {
     Neu_SetSmoothGraphicsOptions(smooth);
 
     Neu_Window window(app, 760, 520, "Neutrino Smooth Graphics Test");
-    window.setTheme(Neu_Theme::BlueGlass());
+    window.setTheme(Neu_Theme::MaterialDark());
     if (!window.create()) return 1;
 
     auto title = std::make_shared<Neu_Button>(Neu_Layout{30, 25, 420, 52, 1.0f, 0, 0});

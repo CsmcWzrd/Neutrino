@@ -40,7 +40,7 @@ int main()
     }
 
     Neu_Window window(app, 720, 520, "Neutrino Test - Collapsible TreeView");
-    window.setTheme(Neu_Theme::BlueGlass());
+    window.setTheme(Neu_Theme::MaterialDark());
     if (!window.create()) {
         return 1;
     }

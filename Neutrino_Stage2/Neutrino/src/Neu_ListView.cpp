@@ -12,7 +12,7 @@ static Neu_Color darkerListHeader(const Neu_Color& c)
                      c.a};
 }
 
-constexpr int kRowHeight = 22;
+constexpr int kRowHeight = 26;
 constexpr int kMinColumnWidth = 48;
 constexpr int kHeaderGrip = 6;
 

@@ -46,7 +46,7 @@ int main(int argc, char** argv)
     }
 
     Neu_Window window(app, 1220, 820, "Neutrino heavy data, rich text, scroll, image and progress demo");
-    window.setTheme(Neu_Theme::BlueGlass());
+    window.setTheme(Neu_Theme::MaterialDark());
     window.setOnClose(closeApp, nullptr);
     if (!window.create()) {
         return 1;

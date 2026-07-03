@@ -435,6 +435,8 @@ class Neu_ComboBox : public Neu_Listbox {
 public:
     using Neu_Listbox::Neu_Listbox;
     const char* className() const override { return "Neu_ComboBox"; }
+    bool isDropDownOpen() const { return open_; }
+    void closeDropDown() { open_ = false; requestRedraw(); }
     void draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme) override;
     void handleXEvent(XEvent& ev) override;
 private:

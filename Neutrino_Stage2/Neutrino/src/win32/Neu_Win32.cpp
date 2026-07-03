@@ -22,7 +22,7 @@ static HFONT g_uiFont = nullptr;
 
 static constexpr int kListMinColumnWidthWin32 = 48;
 static constexpr int kListDefaultColumnWidthWin32 = 160;
-static constexpr int kListRowHeightWin32 = 24;
+static constexpr int kListRowHeightWin32 = 28;
 
 static std::wstring toWide(const std::string& s)
 {
@@ -2208,7 +2208,7 @@ void Neu_ComboBox::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& t
                   rgb(theme.focus));
         int listSaved = SaveDC(drawable);
         IntersectClipRect(drawable, dropX + 2, dropY + 2, listRight - 2, dropY + dropH - 2);
-        const int maxScroll = std::max(0, static_cast<int>(items_.size()) * itemH - (dropH - 4));
+        const int maxScroll = neuMaxIntWin32(0, static_cast<int>(items_.size()) * itemH - (dropH - 4));
         if (scrollY_ > maxScroll) {
             scrollY_ = maxScroll;
         }
@@ -2272,7 +2272,7 @@ void Neu_ComboBox::handleXEvent(XEvent& ev)
 
     if (ev.message == WM_MOUSEWHEEL && inDrop && !items_.empty()) {
         const int delta = GET_WHEEL_DELTA_WPARAM(ev.wParam);
-        const int maxScroll = std::max(0, static_cast<int>(items_.size()) * itemH - (dropH - 4));
+        const int maxScroll = neuMaxIntWin32(0, static_cast<int>(items_.size()) * itemH - (dropH - 4));
         scrollY_ = neuMaxIntWin32(0, neuMinIntWin32(maxScroll, scrollY_ + (delta < 0 ? itemH : -itemH)));
         requestRedraw();
         return;
@@ -2487,9 +2487,13 @@ void Neu_ListView::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& t
             const int clippedCellBottom = neuMinIntWin32(static_cast<int>(cell.bottom), viewportBottom);
             RECT visibleCell = safeRectWin32(clippedCellLeft, clippedCellTop, clippedCellRight, clippedCellBottom);
             if (static_cast<int>(row) == selectedRow_ && static_cast<int>(col) == selectedCol_) {
-                HBRUSH b = CreateSolidBrush(rgb(theme.hover));
-                FillRect(drawable, &visibleCell, b);
-                DeleteObject(b);
+                fillRound(drawable,
+                          Neu_Rect{static_cast<int>(visibleCell.left), static_cast<int>(visibleCell.top),
+                                   neuMaxIntWin32(1, static_cast<int>(visibleCell.right - visibleCell.left)),
+                                   neuMaxIntWin32(1, static_cast<int>(visibleCell.bottom - visibleCell.top))},
+                          std::max(2, theme.radius - 4),
+                          rgb(theme.hover),
+                          rgb(theme.focus));
             }
             FrameRect(drawable, &visibleCell, reinterpret_cast<HBRUSH>(GetStockObject(GRAY_BRUSH)));
             if (visibleCell.right > visibleCell.left + 4) {
@@ -2502,7 +2506,7 @@ void Neu_ListView::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& t
                 const int drawX = neuMaxIntWin32(x, static_cast<int>(visibleCell.left) + 2);
                 const int visibleWidth = neuMaxIntWin32(1, static_cast<int>(visibleCell.right) - drawX - 2);
                 const std::string cellText = truncateTextToWidth(d, drawable, gc, theme, (*model_)[row][col], visibleWidth);
-                drawText(d, drawable, gc, theme, cellText, drawX, y - 14);
+                drawText(d, drawable, gc, theme, cellText, drawX, y - 11);
                 RestoreDC(drawable, cellSaved);
             }
             x += cw;
@@ -3369,12 +3373,7 @@ void Neu_RichTextCode::draw(Display* d, Drawable drawable, GC gc, const Neu_Them
         const size_t caretBytes = std::min(cursor_, text_.size());
         size_t lineIndex = 0;
         size_t lineStart = 0;
-        for (size_t i = 0; i < caretBytes; ++i) {
-            if (text_[i] == '\n') {
-                ++lineIndex;
-                lineStart = i + 1;
-            }
-        }
+        caretLinePrefixWin32(text_, caretBytes, lineIndex, lineStart);
         const std::string prefix = text_.substr(lineStart, caretBytes - lineStart);
         const int caretX = contentLeft + measureTextWidth(d, drawable, gc, theme, prefix, false, false, true) - (wordWrap_ ? 0 : scrollX());
         const int caretY = contentTop + 2 + static_cast<int>(lineIndex) * 20 - scrollY();
@@ -3436,13 +3435,15 @@ void Neu_RichTextCode::handleXEvent(XEvent& ev)
         const size_t before = cursor_;
         Neu_Multilinetextbox::handleXEvent(ev);
         if (cursor_ != before) {
-            // Re-normalize caret after deleting a newline so the visual x/y uses the new logical line.
+            // Re-normalize caret after deleting CR/LF or the final character on a line.
+            cursor_ = std::min(cursor_, text_.size());
             if (cursor_ < text_.size() && text_[cursor_] == '\r') {
                 text_.erase(cursor_, 1);
             }
-            if (scrollX_ < 0) {
-                scrollX_ = 0;
+            if (cursor_ > text_.size()) {
+                cursor_ = text_.size();
             }
+            scrollX_ = neuMaxIntWin32(0, scrollX_);
             requestRedraw();
         }
         return;
@@ -4374,6 +4375,11 @@ void Neu_Window::handleXEvent(XEvent& ev)
 
         Neu_Control* hoverTarget = hitTest(ev.x, ev.y);
         Neu_Control* target = captureControl_ ? captureControl_ : hoverTarget;
+        if (auto combo = dynamic_cast<Neu_ComboBox*>(focusedControl_)) {
+            if (combo->isDropDownOpen()) {
+                target = combo;
+            }
+        }
         if (hoverTarget != hoveredControl_) {
             if (hoveredControl_) {
                 XEvent leave = ev;
@@ -4402,6 +4408,16 @@ void Neu_Window::handleXEvent(XEvent& ev)
 
     if (ev.message == WM_LBUTTONDOWN) {
         SetFocus(window_);
+        if (auto combo = dynamic_cast<Neu_ComboBox*>(focusedControl_)) {
+            if (combo->isDropDownOpen()) {
+                combo->handleXEvent(ev);
+                if (combo->isDropDownOpen()) {
+                    captureControl_ = combo;
+                    SetCapture(window_);
+                }
+                return;
+            }
+        }
         SetCapture(window_);
         Neu_Control* target = hitTest(ev.x, ev.y);
         setFocusedControl(target);
@@ -4423,6 +4439,12 @@ void Neu_Window::handleXEvent(XEvent& ev)
     }
 
     if (ev.message == WM_MOUSEWHEEL || ev.message == WM_MOUSEHWHEEL) {
+        if (auto combo = dynamic_cast<Neu_ComboBox*>(focusedControl_)) {
+            if (combo->isDropDownOpen()) {
+                combo->handleXEvent(ev);
+                return;
+            }
+        }
         Neu_Control* target = hitTest(ev.x, ev.y);
         if (!target) {
             target = focusedControl_;

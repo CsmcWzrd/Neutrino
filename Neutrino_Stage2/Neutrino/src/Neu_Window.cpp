@@ -378,6 +378,11 @@ void Neu_Window::handleXEvent(XEvent& event)
 
     if (event.type == MotionNotify) {
         Neu_Control* target = hitTest(event.xmotion.x, event.xmotion.y);
+        if (auto combo = dynamic_cast<Neu_ComboBox*>(focusedControl_)) {
+            if (combo->isDropDownOpen()) {
+                target = combo;
+            }
+        }
         if (target != hoveredControl_) {
             sendLeave(hoveredControl_, event);
             hoveredControl_ = target;
@@ -389,6 +394,13 @@ void Neu_Window::handleXEvent(XEvent& event)
     }
 
     if (event.type == ButtonPress) {
+        if (auto combo = dynamic_cast<Neu_ComboBox*>(focusedControl_)) {
+            if (combo->isDropDownOpen()) {
+                combo->handleXEvent(event);
+                captureControl_ = combo->isDropDownOpen() ? combo : nullptr;
+                return;
+            }
+        }
         Neu_Control* target = hitTest(event.xbutton.x, event.xbutton.y);
         if (event.xbutton.button <= Button3) {
             setFocusedControl(target);
