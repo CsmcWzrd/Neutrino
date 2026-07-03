@@ -23,6 +23,8 @@ static HFONT g_uiFont = nullptr;
 static constexpr int kListMinColumnWidthWin32 = 48;
 static constexpr int kListDefaultColumnWidthWin32 = 160;
 static constexpr int kListRowHeightWin32 = 28;
+static constexpr int kTreeHeaderHeightWin32 = 26;
+static constexpr int kTreeRowHeightWin32 = 28;
 
 static std::wstring toWide(const std::string& s)
 {
@@ -220,6 +222,31 @@ static HFONT createTextFont(bool bold, bool italic, bool underline, bool strikeO
                        CLEARTYPE_QUALITY,
                        (monospace ? FIXED_PITCH : VARIABLE_PITCH) | FF_DONTCARE,
                        monospace ? L"Consolas" : L"Segoe UI");
+}
+
+
+static int textWidthWin32(HDC hdc,
+                          const std::string& text,
+                          bool monospace = false,
+                          bool bold = false,
+                          bool italic = false,
+                          int headingLevel = 0)
+{
+    if (!hdc || text.empty()) {
+        const int fallbackAdvance = monospace ? 8 : 7;
+        return static_cast<int>(text.size()) * fallbackAdvance;
+    }
+
+    HFONT font = createTextFont(bold, italic, false, false, monospace, headingLevel);
+    HGDIOBJ oldFont = SelectObject(hdc, font ? font : uiFont());
+    std::wstring wide = toWide(text);
+    SIZE size{};
+    GetTextExtentPoint32W(hdc, wide.c_str(), static_cast<int>(wide.size()), &size);
+    SelectObject(hdc, oldFont);
+    if (font) {
+        DeleteObject(font);
+    }
+    return size.cx < 0 ? 0 : static_cast<int>(size.cx);
 }
 
 static std::vector<std::string> logicalLinesWin32(const std::string& text)
@@ -2453,19 +2480,21 @@ void Neu_ListView::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& t
     }
 
     IntersectClipRect(drawable, viewportLeft, bodyTop, viewportRight, viewportBottom);
-    int y = bodyTop + kListRowHeightWin32 - 5 - scrollY_;
-    for (size_t row = 0; row < model_->size(); ++row, y += kListRowHeightWin32) {
-        if (y < bodyTop + 8) {
+    const int listFontHeight = uiFontPixelHeightWin32(drawable);
+    int rowTop = bodyTop - scrollY_;
+    for (size_t row = 0; row < model_->size(); ++row, rowTop += kListRowHeightWin32) {
+        const int rowBottom = rowTop + kListRowHeightWin32;
+        if (rowBottom <= bodyTop) {
             continue;
         }
-        if (y >= viewportBottom) {
+        if (rowTop >= viewportBottom) {
             break;
         }
         const bool rowSelected = multiSelect_ ? selectedRows_.count(static_cast<int>(row)) != 0U : static_cast<int>(row) == selectedRow_;
         const bool rowHovered = static_cast<int>(row) == hoveredRow_;
         if (rowSelected || rowHovered) {
             fillRound(drawable,
-                      Neu_Rect{viewportLeft, y - 18, std::max(1, viewportRight - viewportLeft), 21},
+                      Neu_Rect{viewportLeft, neuMaxIntWin32(rowTop, bodyTop), std::max(1, viewportRight - viewportLeft), neuMaxIntWin32(1, neuMinIntWin32(rowBottom, viewportBottom) - neuMaxIntWin32(rowTop, bodyTop))},
                       std::max(2, theme.radius - 3),
                       rgb(rowSelected ? theme.pressed : theme.hover),
                       rgb(rowSelected ? theme.focus : theme.border));
@@ -2480,7 +2509,7 @@ void Neu_ListView::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& t
             if (x >= viewportRight) {
                 break;
             }
-            RECT cell{x - 3, y - 18, x + cw - 4, y + 3};
+            RECT cell{x - 3, rowTop + 2, x + cw - 4, rowBottom - 2};
             const int clippedCellLeft = neuMaxIntWin32(static_cast<int>(cell.left), viewportLeft);
             const int clippedCellTop = neuMaxIntWin32(static_cast<int>(cell.top), bodyTop);
             const int clippedCellRight = neuMinIntWin32(static_cast<int>(cell.right), viewportRight);
@@ -2506,7 +2535,9 @@ void Neu_ListView::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& t
                 const int drawX = neuMaxIntWin32(x, static_cast<int>(visibleCell.left) + 2);
                 const int visibleWidth = neuMaxIntWin32(1, static_cast<int>(visibleCell.right) - drawX - 2);
                 const std::string cellText = truncateTextToWidth(d, drawable, gc, theme, (*model_)[row][col], visibleWidth);
-                drawText(d, drawable, gc, theme, cellText, drawX, y - 11);
+                const int textTop = neuMaxIntWin32(static_cast<int>(visibleCell.top) + 1,
+                                                    static_cast<int>(visibleCell.top) + neuMaxIntWin32(0, (static_cast<int>(visibleCell.bottom - visibleCell.top) - listFontHeight) / 2));
+                drawText(d, drawable, gc, theme, cellText, drawX, textTop);
                 RestoreDC(drawable, cellSaved);
             }
             x += cw;
@@ -2756,8 +2787,8 @@ void Neu_TreeView::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& t
     Neu_Control::draw(d, drawable, gc, theme);
     const auto rows = buildTreeRowsWin(model(), collapsedPaths_);
     Neu_Rect r = bounds();
-    constexpr int rowHeight = 22;
-    constexpr int headerH = 24;
+    constexpr int rowHeight = kTreeRowHeightWin32;
+    constexpr int headerH = kTreeHeaderHeightWin32;
     int maxWidth = std::max(r.width, treeColumnWidth_ + 24);
     for (const auto& row : rows) {
         const int indent = row.depth * 18;
@@ -2809,19 +2840,21 @@ void Neu_TreeView::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& t
     DeleteObject(headerPen);
 
     IntersectClipRect(drawable, viewportLeft, bodyTop, viewportRight, viewportBottom);
-    int y = bodyTop + rowHeight - 5 - scrollY_;
-    for (size_t i = 0; i < rows.size(); ++i, y += rowHeight) {
-        if (y < bodyTop + 8) {
+    const int treeFontHeight = uiFontPixelHeightWin32(drawable);
+    int rowTop = bodyTop - scrollY_;
+    for (size_t i = 0; i < rows.size(); ++i, rowTop += rowHeight) {
+        const int rowBottom = rowTop + rowHeight;
+        if (rowBottom <= bodyTop) {
             continue;
         }
-        if (y >= viewportBottom) {
+        if (rowTop >= viewportBottom) {
             break;
         }
         const bool selected = multiSelect_ ? selectedVisibleRows_.count(static_cast<int>(i)) != 0U : static_cast<int>(i) == selectedVisibleRow_;
         const bool hovered = static_cast<int>(i) == hoveredVisibleRow_;
         if (selected || hovered) {
             fillRound(drawable,
-                      Neu_Rect{viewportLeft, y - 18, std::max(1, viewportRight - viewportLeft), 21},
+                      Neu_Rect{viewportLeft, neuMaxIntWin32(rowTop, bodyTop), std::max(1, viewportRight - viewportLeft), neuMaxIntWin32(1, neuMinIntWin32(rowBottom, viewportBottom) - neuMaxIntWin32(rowTop, bodyTop))},
                       std::max(2, theme.radius - 3),
                       rgb(selected ? theme.pressed : theme.hover),
                       rgb(selected ? theme.focus : theme.border));
@@ -2832,9 +2865,9 @@ void Neu_TreeView::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& t
         const int columnRight = r.x + 8 + treeColumnWidth_ - scrollX_;
         const std::string label = (row.hasChildren ? (isPathCollapsed(row.path) ? "+ " : "- ") : "  ") + row.label;
         RECT textClip = safeRectWin32(neuMaxIntWin32(textX, viewportLeft),
-                                      y - 18,
+                                      rowTop + 2,
                                       neuMinIntWin32(columnRight, viewportRight),
-                                      y + 3);
+                                      rowBottom - 2);
         if (textClip.right > textClip.left + 2) {
             int cellSaved = SaveDC(drawable);
             const int clipTop = neuMaxIntWin32(static_cast<int>(textClip.top), bodyTop);
@@ -2848,7 +2881,7 @@ void Neu_TreeView::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& t
                      theme,
                      truncateTextToWidth(d, drawable, gc, theme, label, visibleWidth),
                      drawX,
-                     y - 14);
+                     neuMaxIntWin32(clipTop + 1, clipTop + neuMaxIntWin32(0, (clipBottom - clipTop - treeFontHeight) / 2)));
             RestoreDC(drawable, cellSaved);
         }
     }
@@ -2865,8 +2898,8 @@ void Neu_TreeView::handleXEvent(XEvent& ev)
     }
 
     Neu_Rect r = bounds();
-    constexpr int headerH = 24;
-    constexpr int rowHeight = 22;
+    constexpr int headerH = kTreeHeaderHeightWin32;
+    constexpr int rowHeight = kTreeRowHeightWin32;
     const int viewportLeft = r.x + 4;
     const int viewportRight = r.x + r.width - 14;
     const int viewportTop = r.y + 4;
@@ -3432,18 +3465,48 @@ void Neu_RichTextCode::handleXEvent(XEvent& ev)
     }
 
     if (focused_ && ev.message == WM_CHAR && ev.wParam == L'\b') {
-        const size_t before = cursor_;
-        Neu_Multilinetextbox::handleXEvent(ev);
-        if (cursor_ != before) {
-            // Re-normalize caret after deleting CR/LF or the final character on a line.
+        if (cursor_ > 0 && !text_.empty()) {
             cursor_ = std::min(cursor_, text_.size());
-            if (cursor_ < text_.size() && text_[cursor_] == '\r') {
-                text_.erase(cursor_, 1);
+            size_t eraseAt = cursor_ - 1;
+            size_t eraseCount = 1;
+            if (cursor_ >= 2 && text_[cursor_ - 2] == '\r' && text_[cursor_ - 1] == '\n') {
+                eraseAt = cursor_ - 2;
+                eraseCount = 2;
             }
-            if (cursor_ > text_.size()) {
-                cursor_ = text_.size();
+            text_.erase(eraseAt, eraseCount);
+            cursor_ = eraseAt;
+            invokeTextChanged();
+
+            size_t lineIndex = 0;
+            size_t lineStart = 0;
+            caretLinePrefixWin32(text_, cursor_, lineIndex, lineStart);
+            const size_t lineEnd = lineEndOffsetWin32(text_, lineStart);
+            if (cursor_ > lineEnd) {
+                cursor_ = lineEnd;
             }
-            scrollX_ = neuMaxIntWin32(0, scrollX_);
+
+            HDC hdc = parent_ && parent_->xid() ? GetDC(parent_->xid()) : nullptr;
+            int prefixWidth = 0;
+            if (cursor_ > lineStart) {
+                std::string prefix = text_.substr(lineStart, cursor_ - lineStart);
+                while (!prefix.empty() && (prefix.back() == '\r' || prefix.back() == '\n')) {
+                    prefix.pop_back();
+                }
+                prefixWidth = hdc ? textWidthWin32(hdc, prefix, true) : static_cast<int>(prefix.size()) * 8;
+            }
+            if (hdc) {
+                ReleaseDC(parent_->xid(), hdc);
+            }
+
+            const Neu_Rect r = bounds();
+            const int contentWidth = std::max(1, r.width - 70);
+            if (prefixWidth <= contentWidth - 12) {
+                scrollX_ = 0;
+            } else if (prefixWidth - scrollX_ > contentWidth - 8) {
+                scrollX_ = std::max(0, prefixWidth - contentWidth + 8);
+            } else if (prefixWidth < scrollX_ + 4) {
+                scrollX_ = std::max(0, prefixWidth - 8);
+            }
             requestRedraw();
         }
         return;

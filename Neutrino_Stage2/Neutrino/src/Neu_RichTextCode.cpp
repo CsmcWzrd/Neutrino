@@ -230,6 +230,52 @@ void Neu_RichTextCode::handleXEvent(XEvent& event)
         }
     }
 
+    if (focused_ && event.type == KeyPress) {
+        KeySym sym = XLookupKeysym(&event.xkey, 0);
+        if (sym == XK_BackSpace) {
+            if (cursor_ > 0 && !text_.empty()) {
+                cursor_ = std::min(cursor_, text_.size());
+                size_t eraseAt = cursor_ - 1;
+                size_t eraseCount = 1;
+                if (cursor_ >= 2 && text_[cursor_ - 2] == '\r' && text_[cursor_ - 1] == '\n') {
+                    eraseAt = cursor_ - 2;
+                    eraseCount = 2;
+                }
+                text_.erase(eraseAt, eraseCount);
+                cursor_ = eraseAt;
+                invokeTextChanged();
+                size_t lineStart = 0;
+                const size_t searchFrom = cursor_ == 0 ? 0 : cursor_ - 1;
+                const size_t prevLf = text_.rfind('\n', searchFrom);
+                if (prevLf != std::string::npos && prevLf < cursor_) {
+                    lineStart = prevLf + 1;
+                }
+                const size_t nextLf = text_.find('\n', lineStart);
+                const size_t lineEnd = nextLf == std::string::npos ? text_.size() : nextLf;
+                if (cursor_ > lineEnd) {
+                    cursor_ = lineEnd;
+                }
+                std::string prefix = text_.substr(lineStart, cursor_ - lineStart);
+                while (!prefix.empty() && (prefix.back() == '\r' || prefix.back() == '\n')) {
+                    prefix.pop_back();
+                }
+                const auto rect = bounds();
+                const int contentWidth = std::max(1, rect.width - 74);
+                const int prefixWidth = measureTextWidth(nullptr, 0, 0, Neu_Theme{}, prefix, false, false, true);
+                if (prefixWidth <= contentWidth - 12) {
+                    scrollX_ = 0;
+                } else if (prefixWidth - scrollX_ > contentWidth - 8) {
+                    scrollX_ = std::max(0, prefixWidth - contentWidth + 8);
+                } else if (prefixWidth < scrollX_ + 4) {
+                    scrollX_ = std::max(0, prefixWidth - 8);
+                }
+                requestRedraw();
+            }
+            Neu_Control::handleXEvent(event);
+            return;
+        }
+    }
+
     Neu_Multilinetextbox::handleXEvent(event);
 }
 

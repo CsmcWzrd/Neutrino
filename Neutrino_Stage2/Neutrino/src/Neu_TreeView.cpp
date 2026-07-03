@@ -6,7 +6,7 @@ namespace neutrino {
 
 namespace {
 
-constexpr int kTreeRowHeight = 26;
+constexpr int kTreeRowHeight = 30;
 constexpr int kTreeHeaderHeight = 24;
 constexpr int kHeaderGrip = 6;
 
@@ -227,12 +227,13 @@ void Neu_TreeView::draw(Display* display, Drawable drawable, GC gc, const Neu_Th
     XDrawLine(display, drawable, gc, std::min(viewportRight - 1, headerRight - 1), viewportTop + 3, std::min(viewportRight - 1, headerRight - 1), headerBottom - 3);
     drawTextColored(display, drawable, gc, theme, "Tree", std::max(viewportLeft + 4, headerX), viewportTop + kTreeHeaderHeight - 7, theme.text, true);
 
-    int y = rect.y + kTreeHeaderHeight + kTreeRowHeight - scrollY();
-    for (size_t index = 0; index < rows.size(); ++index, y += kTreeRowHeight) {
-        if (y < headerBottom + 2) {
+    int rowTop = headerBottom - scrollY();
+    for (size_t index = 0; index < rows.size(); ++index, rowTop += kTreeRowHeight) {
+        const int rowBottom = rowTop + kTreeRowHeight;
+        if (rowBottom <= headerBottom) {
             continue;
         }
-        if (y >= viewportBottom + kTreeRowHeight) {
+        if (rowTop >= viewportBottom) {
             break;
         }
 
@@ -242,9 +243,9 @@ void Neu_TreeView::draw(Display* display, Drawable drawable, GC gc, const Neu_Th
             Neu_DrawSmoothRoundedRect(display, drawable, gc,
                                       (selectedVisibleRows_.count(visibleIndex) != 0U || visibleIndex == selectedVisibleRow_) ? theme.pressed : theme.hover,
                                       theme.background,
-                                      viewportLeft, y - 16,
+                                      viewportLeft, std::max(rowTop, headerBottom),
                                       std::max(1, viewportRight - viewportLeft),
-                                      kTreeRowHeight,
+                                      std::max(1, std::min(rowBottom, viewportBottom) - std::max(rowTop, headerBottom)),
                                       std::max(2, theme.radius - 3),
                                       true,
                                       theme.antiAliasSamples);
@@ -261,9 +262,9 @@ void Neu_TreeView::draw(Display* display, Drawable drawable, GC gc, const Neu_Th
             continue;
         }
         XRectangle textClip{static_cast<short>(clipLeft),
-                            static_cast<short>(std::max(y - 18, headerBottom)),
+                            static_cast<short>(std::max(rowTop + 2, headerBottom)),
                             static_cast<unsigned short>(std::max(1, clipRight - clipLeft)),
-                            static_cast<unsigned short>(std::max(1, std::min(y + 4, viewportBottom) - std::max(y - 18, headerBottom)))};
+                            static_cast<unsigned short>(std::max(1, std::min(rowBottom - 2, viewportBottom) - std::max(rowTop + 2, headerBottom)))};
         XSetClipRectangles(display, gc, 0, 0, &textClip, 1, Unsorted);
         const int drawX = std::max(textX, clipLeft + 2);
         const int maxTextWidth = std::max(1, clipRight - drawX - 2);
@@ -273,7 +274,7 @@ void Neu_TreeView::draw(Display* display, Drawable drawable, GC gc, const Neu_Th
                  theme,
                  truncateTextToWidth(display, drawable, gc, theme, indicator + row.label, maxTextWidth),
                  drawX,
-                 y);
+                 std::max(rowTop + 7, std::max(rowTop + 2, headerBottom) + 7));
         XSetClipRectangles(display, gc, 0, 0, &clip, 1, Unsorted);
     }
     XSetClipMask(display, gc, None);
@@ -328,7 +329,7 @@ void Neu_TreeView::handleXEvent(XEvent& event)
     const auto rows = buildRows(model(), collapsedPaths_);
     if (event.type == MotionNotify) {
         if (mx() >= viewportLeft && mx() < viewportRight && my() >= viewportTop + kTreeHeaderHeight && my() < viewportBottom) {
-            const int visibleRow = (my() - (rect.y + kTreeHeaderHeight) + scrollY()) / kTreeRowHeight;
+            const int visibleRow = (my() - (viewportTop + kTreeHeaderHeight) + scrollY()) / kTreeRowHeight;
             const int validRow = (visibleRow >= 0 && visibleRow < static_cast<int>(rows.size())) ? visibleRow : -1;
             if (validRow != hoveredVisibleRow_) {
                 hoveredVisibleRow_ = validRow;
@@ -350,7 +351,7 @@ void Neu_TreeView::handleXEvent(XEvent& event)
     }
 
     if (event.type == ButtonRelease && event.xbutton.button == Button1) {
-        const int visibleRow = (event.xbutton.y - (rect.y + kTreeHeaderHeight) + scrollY()) / kTreeRowHeight;
+        const int visibleRow = (event.xbutton.y - (viewportTop + kTreeHeaderHeight) + scrollY()) / kTreeRowHeight;
 
         if (visibleRow >= 0 && visibleRow < static_cast<int>(rows.size())) {
             const bool ctrl = (event.xbutton.state & ControlMask) != 0U;

@@ -12,7 +12,7 @@ static Neu_Color darkerListHeader(const Neu_Color& c)
                      c.a};
 }
 
-constexpr int kRowHeight = 26;
+constexpr int kRowHeight = 30;
 constexpr int kMinColumnWidth = 48;
 constexpr int kHeaderGrip = 6;
 
@@ -234,12 +234,13 @@ void Neu_ListView::draw(Display* display, Drawable drawable, GC gc, const Neu_Th
         x += cw;
     }
 
-    int y = rect.y + headerH + kRowHeight - scrollY();
-    for (size_t row = 1; row < model_->size(); ++row, y += kRowHeight) {
-        if (y < headerBottom + 2) {
+    int rowTop = headerBottom - scrollY();
+    for (size_t row = 1; row < model_->size(); ++row, rowTop += kRowHeight) {
+        const int rowBottom = rowTop + kRowHeight;
+        if (rowBottom <= headerBottom) {
             continue;
         }
-        if (y >= viewportBottom + kRowHeight) {
+        if (rowTop >= viewportBottom) {
             break;
         }
 
@@ -249,9 +250,9 @@ void Neu_ListView::draw(Display* display, Drawable drawable, GC gc, const Neu_Th
             Neu_DrawSmoothRoundedRect(display, drawable, gc,
                                       (selectedRows_.count(rowIndex) != 0U || rowIndex == selectedRow_) ? theme.pressed : theme.hover,
                                       theme.background,
-                                      viewportLeft, y - 16,
+                                      viewportLeft, std::max(rowTop, headerBottom),
                                       std::max(1, viewportRight - viewportLeft),
-                                      kRowHeight,
+                                      std::max(1, std::min(rowBottom, viewportBottom) - std::max(rowTop, headerBottom)),
                                       std::max(2, theme.radius - 3),
                                       true,
                                       theme.antiAliasSamples);
@@ -275,26 +276,26 @@ void Neu_ListView::draw(Display* display, Drawable drawable, GC gc, const Neu_Th
             if (rowIndex == selectedRow_ && static_cast<int>(column) == selectedCol_) {
                 XSetForeground(display, gc, Neu_Pixel(display, theme.hover));
                 Neu_DrawSmoothRoundedRect(display, drawable, gc, theme.hover, theme.background,
-                                          drawLeft, y - 16,
+                                          drawLeft, std::max(rowTop, headerBottom),
                                           std::max(1, drawRight - drawLeft),
-                                          kRowHeight,
+                                          std::max(1, std::min(rowBottom, viewportBottom) - std::max(rowTop, headerBottom)),
                                           std::max(2, theme.radius - 3),
                                           true,
                                           theme.antiAliasSamples);
             }
 
             XSetForeground(display, gc, Neu_Pixel(display, theme.border));
-            XDrawRectangle(display, drawable, gc, drawLeft, y - 18,
+            XDrawRectangle(display, drawable, gc, drawLeft, rowTop + 2,
                            static_cast<unsigned int>(std::max(1, drawRight - drawLeft)),
-                           static_cast<unsigned int>(kRowHeight));
+                           static_cast<unsigned int>(std::max(1, kRowHeight - 4)));
 
             const int clipLeft = std::max(x, viewportLeft + 2);
             const int clipRight = std::min(x + cw - 10, viewportRight - 2);
             if (clipRight > clipLeft) {
                 XRectangle cellClip{static_cast<short>(clipLeft),
-                                    static_cast<short>(std::max(y - 18, headerBottom)),
+                                    static_cast<short>(std::max(rowTop + 2, headerBottom)),
                                     static_cast<unsigned short>(std::max(1, clipRight - clipLeft)),
-                                    static_cast<unsigned short>(std::max(1, std::min(y + 4, viewportBottom) - std::max(y - 18, headerBottom)))};
+                                    static_cast<unsigned short>(std::max(1, std::min(rowBottom - 2, viewportBottom) - std::max(rowTop + 2, headerBottom)))};
                 XSetClipRectangles(display, gc, 0, 0, &cellClip, 1, Unsorted);
                 const int drawX = std::max(x, clipLeft + 2);
                 const int visibleWidth = std::max(1, clipRight - drawX - 2);
@@ -304,7 +305,8 @@ void Neu_ListView::draw(Display* display, Drawable drawable, GC gc, const Neu_Th
                                                              theme,
                                                              (*model_)[row][column],
                                                              visibleWidth);
-                drawText(display, drawable, gc, theme, cell, drawX, y);
+                const int textY = std::max(rowTop + 7, std::max(rowTop + 2, headerBottom) + 7);
+                drawText(display, drawable, gc, theme, cell, drawX, textY);
                 XSetClipRectangles(display, gc, 0, 0, &fullClip, 1, Unsorted);
             }
             x += cw;
