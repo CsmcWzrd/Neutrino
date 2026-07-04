@@ -293,6 +293,7 @@ private:
     Display* display_{nullptr};
     int screen_{0};
     bool xrenderAvailable_{false};
+    void* xrenderLibrary_{nullptr};
 #endif
     Neu_Backend backend_{Neu_Backend::Auto};
     std::string backendName_{"auto"};
@@ -333,7 +334,7 @@ public:
     void addRichTextFragment(const Neu_TextFragment& fragment) { richTextFragments_.push_back(fragment); requestRedraw(); }
     void clearRichTextFragments() { richTextFragments_.clear(); requestRedraw(); }
     const std::vector<Neu_TextFragment>& richTextFragments() const { return richTextFragments_; }
-    void setAutoScroll(bool enabled) { autoScroll_ = enabled; requestRedraw(); }
+    void setAutoScroll(bool enabled) { if (autoScroll_ != enabled) { autoScroll_ = enabled; requestRedraw(); } }
     bool autoScroll() const { return autoScroll_; }
     void setScrollOffset(int x, int y);
     int scrollX() const { return scrollX_; }
@@ -878,6 +879,8 @@ public:
     void redraw();
     void invalidate();
     void requestRedraw();
+    bool hasPendingRedraw() const;
+    void flushPendingRedraw();
     void paint(Drawable target);
     void setMultiStageDoubleBuffering(bool enabled);
     bool multiStageDoubleBuffering() const { return multiStageDoubleBuffering_; }
@@ -906,6 +909,10 @@ private:
     Neu_Control* hoveredControl_{nullptr};
     Neu_Control* captureControl_{nullptr};
     bool closing_{false};
+    bool dirty_{false};
+    bool painting_{false};
+    bool redrawRequestedDuringPaint_{false};
+    bool mapped_{false};
     bool multiStageDoubleBuffering_{true};
 #ifdef _WIN32
     HDC memoryDc_{nullptr};
@@ -915,6 +922,7 @@ private:
     Pixmap stageBackground_{0};
     Pixmap stageCompose_{0};
     Pixmap stageFinal_{0};
+    XFontStruct* coreFont_{nullptr};
 #endif
     int bufferWidth_{0};
     int bufferHeight_{0};

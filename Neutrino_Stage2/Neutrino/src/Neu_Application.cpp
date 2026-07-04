@@ -2,6 +2,7 @@
 #include <dlfcn.h>
 #include <cstdlib>
 #include <cstring>
+#include <clocale>
 
 namespace neutrino {
 
@@ -16,7 +17,14 @@ Neu_Application::~Neu_Application()
 {
     if (display_) {
         XCloseDisplay(display_);
+        display_ = nullptr;
     }
+#ifndef _WIN32
+    if (xrenderLibrary_) {
+        dlclose(xrenderLibrary_);
+        xrenderLibrary_ = nullptr;
+    }
+#endif
     current_ = nullptr;
 }
 
@@ -62,7 +70,10 @@ bool Neu_Application::detectXRender()
         return false;
     }
 
-    void* library = dlopen("libXrender.so.1", RTLD_LAZY);
+    void* library = xrenderLibrary_;
+    if (!library) {
+        library = dlopen("libXrender.so.1", RTLD_LAZY);
+    }
     if (!library) {
         library = dlopen("libXrender.so", RTLD_LAZY);
     }
@@ -75,12 +86,24 @@ bool Neu_Application::detectXRender()
     int eventBase = 0;
     int errorBase = 0;
     const bool available = query && query(display_, &eventBase, &errorBase);
-    dlclose(library);
+
+    // XRenderQueryExtension registers Xlib extension callbacks on the Display.
+    // The library must remain loaded until after XCloseDisplay(), otherwise
+    // Xlib may jump through an extension close hook that points into an
+    // unloaded shared object when the application exits.
+    if (available) {
+        xrenderLibrary_ = library;
+    } else if (library != xrenderLibrary_) {
+        dlclose(library);
+    }
+
     return available;
 }
 
 bool Neu_Application::open()
 {
+    std::setlocale(LC_CTYPE, "");
+    XSetLocaleModifiers("");
     waylandAvailable_ = detectWayland();
     const char* forceX11 = std::getenv("NEUTRINO_USE_X11");
     const bool useX11 = forceX11 && std::strcmp(forceX11, "1") == 0;
@@ -152,15 +175,60 @@ void Neu_Application::run()
 {
     running_ = true;
 
-    while (running_ && !windows_.empty()) {
-        XEvent event;
-        XNextEvent(display_, &event);
-
+    auto dispatchEvent = [this](XEvent& event) {
+        Neu_Window* target = nullptr;
         for (auto* window : windows_) {
-            if (event.xany.window == window->xid()) {
-                window->handleXEvent(event);
+            if (window && event.xany.window == window->xid()) {
+                target = window;
                 break;
             }
+        }
+
+        if (target) {
+            target->handleXEvent(event);
+        }
+    };
+
+    auto flushDirtyWindows = [this]() {
+        bool painted = false;
+        const auto snapshot = windows_;
+        for (auto* window : snapshot) {
+            if (!window) {
+                continue;
+            }
+
+            if (std::find(windows_.begin(), windows_.end(), window) == windows_.end()) {
+                continue;
+            }
+
+            if (window->hasPendingRedraw()) {
+                window->flushPendingRedraw();
+                painted = true;
+            }
+        }
+        return painted;
+    };
+
+    while (running_ && !windows_.empty()) {
+        bool processedEvent = false;
+
+        while (running_ && !windows_.empty() && XPending(display_) > 0) {
+            XEvent event;
+            XNextEvent(display_, &event);
+            dispatchEvent(event);
+            processedEvent = true;
+        }
+
+        const bool painted = flushDirtyWindows();
+
+        if (!running_ || windows_.empty()) {
+            break;
+        }
+
+        if (!processedEvent && !painted) {
+            XEvent event;
+            XNextEvent(display_, &event);
+            dispatchEvent(event);
         }
     }
 }

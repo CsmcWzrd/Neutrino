@@ -102,6 +102,16 @@ bool Neu_Window::create()
                  | LeaveWindowMask
                  | StructureNotifyMask);
     gc_ = XCreateGC(display_, window_, 0, nullptr);
+    if (gc_) {
+        // XCreateGC does not guarantee a useful core font on every X11 server.
+        // Set a known built-in font so any remaining low-level XDrawString
+        // helpers still produce visible text even when Xft is unavailable or
+        // disabled. The higher-level text renderer may replace this per draw.
+        coreFont_ = XLoadQueryFont(display_, "fixed");
+        if (coreFont_) {
+            XSetFont(display_, gc_, coreFont_->fid);
+        }
+    }
     XSetBackground(display_, gc_, Neu_Pixel(display_, theme_.background));
     wmDelete_ = XInternAtom(display_, "WM_DELETE_WINDOW", False);
     XSetWMProtocols(display_, window_, &wmDelete_, 1);
@@ -146,6 +156,10 @@ void Neu_Window::close()
     }
 
     closing_ = true;
+    dirty_ = false;
+    painting_ = false;
+    redrawRequestedDuringPaint_ = false;
+    mapped_ = false;
     focusedControl_ = nullptr;
     hoveredControl_ = nullptr;
     captureControl_ = nullptr;
@@ -158,7 +172,13 @@ void Neu_Window::close()
         gc_ = 0;
     }
 
+    if (coreFont_) {
+        XFreeFont(display_, coreFont_);
+        coreFont_ = nullptr;
+    }
+
     XDestroyWindow(display_, window_);
+    XFlush(display_);
     window_ = 0;
 }
 
@@ -289,17 +309,60 @@ void Neu_Window::paint(Drawable target)
 
 void Neu_Window::redraw()
 {
+    if (!window_ || closing_) {
+        return;
+    }
+
+    if (painting_) {
+        dirty_ = true;
+        redrawRequestedDuringPaint_ = true;
+        return;
+    }
+
+    dirty_ = false;
+    redrawRequestedDuringPaint_ = false;
+    painting_ = true;
     paint(window_);
+    painting_ = false;
+
+    // Ignore redraw requests raised while painting.  A paint method must be a
+    // pure renderer; allowing paint-time requestRedraw() calls to re-dirty the
+    // window creates an endless redraw loop and keeps Linux/X11 at high CPU.
+    // User input, expose, resize, timer-like app code and explicit setters will
+    // still schedule the next repaint after this frame completes.
+    if (redrawRequestedDuringPaint_) {
+        dirty_ = false;
+        redrawRequestedDuringPaint_ = false;
+    }
 }
 
 void Neu_Window::invalidate()
 {
-    redraw();
+    requestRedraw();
 }
 
 void Neu_Window::requestRedraw()
 {
-    invalidate();
+    if (!window_ || closing_) {
+        return;
+    }
+
+    dirty_ = true;
+    if (painting_) {
+        redrawRequestedDuringPaint_ = true;
+    }
+}
+
+bool Neu_Window::hasPendingRedraw() const
+{
+    return window_ && !closing_ && dirty_;
+}
+
+void Neu_Window::flushPendingRedraw()
+{
+    if (hasPendingRedraw()) {
+        redraw();
+    }
 }
 
 void Neu_Window::setMultiStageDoubleBuffering(bool enabled)
@@ -350,6 +413,22 @@ void Neu_Window::handleXEvent(XEvent& event)
             onClose_(this, closeUserData_);
         }
         close();
+        return;
+    }
+
+    if (event.type == DestroyNotify) {
+        close();
+        return;
+    }
+
+    if (event.type == MapNotify) {
+        mapped_ = true;
+        requestRedraw();
+        return;
+    }
+
+    if (event.type == UnmapNotify) {
+        mapped_ = false;
         return;
     }
 

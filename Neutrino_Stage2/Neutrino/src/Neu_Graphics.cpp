@@ -1,11 +1,79 @@
 #include "Neutrino/Neutrino.hpp"
 #include <X11/Xutil.h>
 #include <cstdlib>
+#include <map>
+#include <tuple>
+#include <cstdint>
 
 namespace neutrino {
 
 static Neu_SmoothGraphicsOptions g_smoothOptions{};
 static Neu_Theme g_currentDrawingTheme{};
+
+namespace {
+
+static int Neu_MaskShift(unsigned long mask)
+{
+    if (!mask) {
+        return 0;
+    }
+    int shift = 0;
+    while ((mask & 1UL) == 0UL) {
+        ++shift;
+        mask >>= 1;
+    }
+    return shift;
+}
+
+static int Neu_MaskBits(unsigned long mask)
+{
+    int bits = 0;
+    while (mask) {
+        bits += static_cast<int>(mask & 1UL);
+        mask >>= 1;
+    }
+    return bits;
+}
+
+static unsigned long Neu_ChannelToMask(uint8_t channel, unsigned long mask)
+{
+    if (!mask) {
+        return 0;
+    }
+    const int shift = Neu_MaskShift(mask);
+    const int bits = Neu_MaskBits(mask);
+    const unsigned long maxValue = (bits >= static_cast<int>(sizeof(unsigned long) * 8))
+                                   ? ~0UL
+                                   : ((1UL << bits) - 1UL);
+    const unsigned long scaled = (static_cast<unsigned long>(channel) * maxValue + 127UL) / 255UL;
+    return (scaled << shift) & mask;
+}
+
+static uint8_t Neu_ChannelFromMask(unsigned long pixel, unsigned long mask)
+{
+    if (!mask) {
+        return 0;
+    }
+    const int shift = Neu_MaskShift(mask);
+    const int bits = Neu_MaskBits(mask);
+    const unsigned long maxValue = (bits >= static_cast<int>(sizeof(unsigned long) * 8))
+                                   ? ~0UL
+                                   : ((1UL << bits) - 1UL);
+    const unsigned long raw = (pixel & mask) >> shift;
+    if (!maxValue) {
+        return 0;
+    }
+    return static_cast<uint8_t>((raw * 255UL + maxValue / 2UL) / maxValue);
+}
+
+static bool Neu_IsDirectColorVisual(Visual* visual)
+{
+    return visual && (visual->c_class == TrueColor || visual->c_class == DirectColor);
+}
+
+static std::map<std::tuple<void*, int, int, int>, unsigned long> g_x11PixelCache;
+
+} // namespace
 
 unsigned long Neu_Pixel(Display* display, const Neu_Color& color)
 {
@@ -15,18 +83,36 @@ unsigned long Neu_Pixel(Display* display, const Neu_Color& color)
                | color.b;
     }
 
+    Visual* visual = DefaultVisual(display, DefaultScreen(display));
+    if (Neu_IsDirectColorVisual(visual)) {
+        return Neu_ChannelToMask(color.r, visual->red_mask)
+               | Neu_ChannelToMask(color.g, visual->green_mask)
+               | Neu_ChannelToMask(color.b, visual->blue_mask);
+    }
+
+    const auto key = std::make_tuple(static_cast<void*>(display),
+                                     static_cast<int>(color.r),
+                                     static_cast<int>(color.g),
+                                     static_cast<int>(color.b));
+    const auto found = g_x11PixelCache.find(key);
+    if (found != g_x11PixelCache.end()) {
+        return found->second;
+    }
+
     XColor xcolor{};
     xcolor.red = static_cast<unsigned short>(color.r * 257);
     xcolor.green = static_cast<unsigned short>(color.g * 257);
     xcolor.blue = static_cast<unsigned short>(color.b * 257);
 
+    unsigned long pixel = (static_cast<unsigned long>(color.r) << 16)
+                          | (static_cast<unsigned long>(color.g) << 8)
+                          | color.b;
     if (XAllocColor(display, DefaultColormap(display, DefaultScreen(display)), &xcolor)) {
-        return xcolor.pixel;
+        pixel = xcolor.pixel;
     }
 
-    return (static_cast<unsigned long>(color.r) << 16)
-           | (static_cast<unsigned long>(color.g) << 8)
-           | color.b;
+    g_x11PixelCache[key] = pixel;
+    return pixel;
 }
 
 Neu_Color Neu_PixelToColor(Display* display, unsigned long pixel)
@@ -36,6 +122,16 @@ Neu_Color Neu_PixelToColor(Display* display, unsigned long pixel)
             static_cast<uint8_t>((pixel >> 16) & 0xff),
             static_cast<uint8_t>((pixel >> 8) & 0xff),
             static_cast<uint8_t>(pixel & 0xff),
+            255
+        };
+    }
+
+    Visual* visual = DefaultVisual(display, DefaultScreen(display));
+    if (Neu_IsDirectColorVisual(visual)) {
+        return {
+            Neu_ChannelFromMask(pixel, visual->red_mask),
+            Neu_ChannelFromMask(pixel, visual->green_mask),
+            Neu_ChannelFromMask(pixel, visual->blue_mask),
             255
         };
     }
