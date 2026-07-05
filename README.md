@@ -11,3 +11,6 @@ Mac OS is untested
 Does not use Cairo    
 Uses X11 or wayland on Linux   
 Uses Basic Windowing on Windows    
+
+# LICENSE
+Product released as "Public Domain" software.
