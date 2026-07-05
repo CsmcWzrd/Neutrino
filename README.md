@@ -17,4 +17,4 @@ Product released as "Public Domain" software.
 
 
 Designed by Anoop Kumar Narayanan     
-ChatGPT 5.5 Coded     
+Coded by ChatGPT 5.5    
