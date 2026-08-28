@@ -1,0 +1,9 @@
+# Neutrino proprietary theme asset: candy
+name=candy
+background=#FFF0F8
+glass=#FFFFFF
+border=#F5A5D6
+text=#35152E
+accent=#FF4FB3
+hover=#FFE0F2
+pressed=#FFD0EC

@@ -1,0 +1,9 @@
+# Neutrino proprietary theme asset: ubuntu_aubergine
+name=ubuntu_aubergine
+background=#2C001E
+glass=#5E2750
+border=#AEA79F
+text=#FFFFFF
+accent=#E95420
+hover=#77216F
+pressed=#3B0B2E

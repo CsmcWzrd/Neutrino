@@ -1,0 +1,9 @@
+# Neutrino proprietary theme asset: terminal_green
+name=terminal_green
+background=#001400
+glass=#002300
+border=#005500
+text=#A0FFA0
+accent=#00FF41
+hover=#003700
+pressed=#005500

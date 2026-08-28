@@ -1,0 +1,25 @@
+# Neutrino proprietary theme asset: material_dark
+# Stage2 beauty rendering extension keys are documented here even when built-in
+# themes are selected programmatically through Neu_Theme::BuiltInThemeByName().
+name=material_dark
+background=#121212
+glass=#1E1E22
+border=#3E424A
+text=#EEEEEE
+accent=#90CAF9
+hover=#404C5C
+pressed=#383C44
+highlight=#405C78
+focus=#2A70B2
+control-gradient-top=#3A3E46
+control-gradient-bottom=#16181E
+gradient-controls=true
+corner-top-left=top-left-edge-corner
+corner-top-right=top-right-rounded-corner
+corner-bottom-left=bottom-left-rounded-corner
+corner-bottom-right=bottom-right-edge-corner
+edge-size=8
+rounded-corner=false
+anti-aliasing=SSAA
+anti-alias-samples=4
+font=Roboto:size=10:antialias=true:hinting=true:hintstyle=hintfull:rgba=rgb:lcdfilter=lcddefault
