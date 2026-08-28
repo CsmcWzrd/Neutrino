@@ -39,8 +39,8 @@ int main(int argc, char** argv)
     code->setReadOnly(false);
     code->setToolbarVisible(true);
     code->setWordWrap(true);
-    code->setDefaultFontColor(Neu_Color{25, 35, 45, 255});
-    code->setSketchHighlightColor(Neu_Color{255, 240, 130, 160});
+    code->setDefaultFontColor(win.theme().text);
+    code->setSketchHighlightColor(win.theme().highlight);
     code->setAutoScroll(true);
     code->setText(sample_code);
     code->setHintText("Simple coding rich-text component: line numbers, language name, keyword-line highlighting, and scroll offsets.");

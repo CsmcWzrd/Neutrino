@@ -10,6 +10,7 @@
 #include <cwchar>
 #include <sstream>
 #include <cctype>
+#include <iterator>
 
 namespace neutrino {
 
@@ -4176,6 +4177,8 @@ void Neu_RichTextCode::draw(Display* d, Drawable drawable, GC gc, const Neu_Them
     const int contentTop = r.y + toolbarH + 4;
     const int contentBottom = r.y + r.height - 14;
     const int contentWidth = std::max(1, contentRight - contentLeft);
+    const Neu_Color effectiveFontColor = effectiveDefaultFontColor(theme);
+    const Neu_Color gutterTextColor{35, 45, 55, 255};
     int y = contentTop + 2 - scrollY();
     int maxWidth = r.width;
     int logicalLineNo = 1;
@@ -4200,11 +4203,11 @@ void Neu_RichTextCode::draw(Display* d, Drawable drawable, GC gc, const Neu_Them
             const bool dstrike = fragment ? fragment->doubleStrikethrough : false;
             const bool mono = fragment ? fragment->monospace : true;
             const int heading = fragment ? fragment->headingLevel : 0;
-            const Neu_Color color = fragment && fragment->useFontColor ? fragment->fontColor : defaultFontColor_;
+            const Neu_Color color = fragment && fragment->useFontColor ? fragment->fontColor : effectiveFontColor;
             const int measured = measureTextWidth(d, drawable, gc, theme, visualLine, bold, italic, mono, heading);
             maxWidth = std::max(maxWidth, measured + 82);
             if (visibleY) {
-                drawText(d, drawable, gc, theme, std::to_string(lineNo), r.x + 8, y);
+                drawTextColored(d, drawable, gc, theme, std::to_string(lineNo), r.x + 8, y, gutterTextColor);
                 int textSaved = SaveDC(drawable);
                 IntersectClipRect(drawable, contentLeft, contentTop, contentRight, contentBottom);
                 if (fragment && fragment->useHighlightColor) {
@@ -4240,12 +4243,12 @@ void Neu_RichTextCode::draw(Display* d, Drawable drawable, GC gc, const Neu_Them
     };
 
     if (!richTextFragments().empty()) {
-        const auto styledLines = buildStyledLinesWin32(text_, richTextFragments_, defaultFontColor_);
+        const auto styledLines = buildStyledLinesWin32(text_, richTextFragments_, effectiveFontColor);
         for (const auto& styledLine : styledLines) {
             const int lineHeight = std::max(20, styledLine.height);
             const bool visibleY = y >= contentTop && y < contentBottom;
             if (visibleY) {
-                drawText(d, drawable, gc, theme, std::to_string(logicalLineNo), r.x + 8, y);
+                drawTextColored(d, drawable, gc, theme, std::to_string(logicalLineNo), r.x + 8, y, gutterTextColor);
                 int textSaved = SaveDC(drawable);
                 IntersectClipRect(drawable, contentLeft, contentTop, contentRight, contentBottom);
                 int x = contentLeft - (wordWrap_ ? 0 : scrollX());
@@ -4275,7 +4278,7 @@ void Neu_RichTextCode::draw(Display* d, Drawable drawable, GC gc, const Neu_Them
                                     run.text,
                                     x,
                                     y,
-                                    run.style.useFontColor ? run.style.fontColor : defaultFontColor_,
+                                    run.style.useFontColor ? run.style.fontColor : effectiveFontColor,
                                     run.style.bold,
                                     run.style.italic,
                                     run.style.underline,
@@ -5029,46 +5032,95 @@ void Neu_TabView::handleXEvent(XEvent& ev)
     Neu_Control::handleXEvent(ev);
 }
 
+
+static int clampSplitterPositionWin32(const Neu_Rect& r, bool vertical, int requested, int minimumPaneSize, int sashSize)
+{
+    const int extent = std::max(1, vertical ? r.width : r.height);
+    const int halfSash = std::max(1, sashSize / 2);
+    const int minPane = std::max(0, minimumPaneSize);
+    const int low = 4 + minPane + halfSash;
+    const int high = extent - 4 - minPane - halfSash;
+    if (high < low) {
+        return std::max(4 + halfSash, extent / 2);
+    }
+    return std::max(low, std::min(requested, high));
+}
+
+static RECT splitterPaneRectWin32(const Neu_Rect& r, bool vertical, bool firstPane, int split, int sashSize)
+{
+    const int halfSash = std::max(1, sashSize / 2);
+    if (vertical) {
+        const int left = firstPane ? r.x + 4 : r.x + split + halfSash;
+        const int right = firstPane ? r.x + split - halfSash : r.x + r.width - 4;
+        return RECT{left, r.y + 4, std::max(left, right), r.y + r.height - 4};
+    }
+    const int top = firstPane ? r.y + 4 : r.y + split + halfSash;
+    const int bottom = firstPane ? r.y + split - halfSash : r.y + r.height - 4;
+    return RECT{r.x + 4, top, r.x + r.width - 4, std::max(top, bottom)};
+}
+
+static bool splitterChildInFirstPaneWin32(const Neu_Rect& r,
+                                          const Neu_Rect& cr,
+                                          bool vertical,
+                                          size_t childIndex,
+                                          size_t childCount,
+                                          int split)
+{
+    if (childCount <= 1U) {
+        return true;
+    }
+    if (childIndex == 0U) {
+        return true;
+    }
+    if (childIndex == 1U) {
+        return false;
+    }
+    const int splitAbs = vertical ? r.x + split : r.y + split;
+    return vertical ? cr.x < splitAbs : cr.y < splitAbs;
+}
+
+static bool pointInPaneRectWin32(const RECT& pane, int x, int y)
+{
+    return pane.right > pane.left && pane.bottom > pane.top &&
+           x >= pane.left && x < pane.right && y >= pane.top && y < pane.bottom;
+}
+
 void Neu_Splitter::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme)
 {
     Neu_Control::draw(d, drawable, gc, theme);
     Neu_Rect r = bounds();
-    const int split = vertical_ ? std::max(24, std::min(splitPosition_, r.width - 24))
-                                : std::max(24, std::min(splitPosition_, r.height - 24));
+    const int sash = std::max(3, sashSize_);
+    const int halfSash = std::max(1, sash / 2);
+    const int split = clampSplitterPositionWin32(r, vertical_, splitPosition_, minimumPaneSize_, sash);
+    if (split != splitPosition_) {
+        splitPosition_ = split;
+    }
     const int splitAbs = vertical_ ? r.x + split : r.y + split;
+    const size_t childCount = children().size();
 
-    for (auto& child : children()) {
+    for (size_t index = 0; index < childCount; ++index) {
+        auto& child = children()[index];
         if (!child || !child->visible()) {
             continue;
         }
         Neu_Rect cr = child->bounds();
-        int saved = SaveDC(drawable);
-        if (vertical_) {
-            const bool leftPane = cr.x + cr.width / 2 < splitAbs;
-            const int clipLeft = leftPane ? r.x + 2 : splitAbs + 2;
-            const int clipRight = leftPane ? splitAbs - 2 : r.x + r.width - 2;
-            if (clipRight > clipLeft) {
-                IntersectClipRect(drawable, clipLeft, r.y + 2, clipRight, r.y + r.height - 2);
-                child->draw(d, drawable, gc, theme);
-            }
-        } else {
-            const bool topPane = cr.y + cr.height / 2 < splitAbs;
-            const int clipTop = topPane ? r.y + 2 : splitAbs + 2;
-            const int clipBottom = topPane ? splitAbs - 2 : r.y + r.height - 2;
-            if (clipBottom > clipTop) {
-                IntersectClipRect(drawable, r.x + 2, clipTop, r.x + r.width - 2, clipBottom);
-                child->draw(d, drawable, gc, theme);
-            }
+        const bool firstPane = splitterChildInFirstPaneWin32(r, cr, vertical_, index, childCount, split);
+        RECT pane = splitterPaneRectWin32(r, vertical_, firstPane, split, sash);
+        if (pane.right <= pane.left || pane.bottom <= pane.top) {
+            continue;
         }
+        int saved = SaveDC(drawable);
+        IntersectClipRect(drawable, pane.left, pane.top, pane.right, pane.bottom);
+        child->draw(d, drawable, gc, theme);
         RestoreDC(drawable, saved);
     }
 
     HBRUSH b = CreateSolidBrush(rgb(theme.focus));
     if (vertical_) {
-        RECT sr{splitAbs - 2, r.y + 4, splitAbs + 2, r.y + r.height - 4};
+        RECT sr{splitAbs - halfSash, r.y + 4, splitAbs + halfSash + (sash % 2), r.y + r.height - 4};
         FillRect(drawable, &sr, b);
     } else {
-        RECT sr{r.x + 4, splitAbs - 2, r.x + r.width - 4, splitAbs + 2};
+        RECT sr{r.x + 4, splitAbs - halfSash, r.x + r.width - 4, splitAbs + halfSash + (sash % 2)};
         FillRect(drawable, &sr, b);
     }
     DeleteObject(b);
@@ -5078,13 +5130,13 @@ void Neu_Splitter::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& t
 void Neu_Splitter::handleXEvent(XEvent& ev)
 {
     Neu_Rect r = bounds();
-    const int sash = 5;
-    const int split = vertical_ ? std::max(24, std::min(splitPosition_, r.width - 24))
-                                : std::max(24, std::min(splitPosition_, r.height - 24));
+    const int sash = std::max(3, sashSize_);
+    const int halfSash = std::max(1, sash / 2);
+    const int split = clampSplitterPositionWin32(r, vertical_, splitPosition_, minimumPaneSize_, sash);
     const int splitAbs = vertical_ ? r.x + split : r.y + split;
     const bool onSash = vertical_
-                        ? (ev.x >= splitAbs - sash && ev.x <= splitAbs + sash && ev.y >= r.y && ev.y <= r.y + r.height)
-                        : (ev.y >= splitAbs - sash && ev.y <= splitAbs + sash && ev.x >= r.x && ev.x <= r.x + r.width);
+                        ? (ev.x >= splitAbs - halfSash - 2 && ev.x <= splitAbs + halfSash + 2 && ev.y >= r.y && ev.y <= r.y + r.height)
+                        : (ev.y >= splitAbs - halfSash - 2 && ev.y <= splitAbs + halfSash + 2 && ev.x >= r.x && ev.x <= r.x + r.width);
 
     if (ev.message == WM_LBUTTONDOWN && onSash) {
         dragging_ = true;
@@ -5099,17 +5151,18 @@ void Neu_Splitter::handleXEvent(XEvent& ev)
     }
 
     if (ev.message == WM_MOUSEMOVE || ev.message == WM_LBUTTONDOWN || ev.message == WM_LBUTTONUP) {
+        const size_t childCount = children().size();
         for (auto it = children().rbegin(); it != children().rend(); ++it) {
+            const size_t reverseIndex = static_cast<size_t>(std::distance(children().rbegin(), it));
+            const size_t childIndex = childCount - 1U - reverseIndex;
             auto& child = *it;
             if (!child || !child->visible() || !child->enabled()) {
                 continue;
             }
             const Neu_Rect cr = child->bounds();
-            const bool firstPane = vertical_ ? (cr.x + cr.width / 2 < splitAbs) : (cr.y + cr.height / 2 < splitAbs);
-            const bool pointInPane = vertical_
-                                     ? (firstPane ? ev.x < splitAbs - sash : ev.x > splitAbs + sash)
-                                     : (firstPane ? ev.y < splitAbs - sash : ev.y > splitAbs + sash);
-            if (pointInPane && child->contains(ev.x, ev.y)) {
+            const bool firstPane = splitterChildInFirstPaneWin32(r, cr, vertical_, childIndex, childCount, split);
+            const RECT pane = splitterPaneRectWin32(r, vertical_, firstPane, split, sash);
+            if (pointInPaneRectWin32(pane, ev.x, ev.y) && child->contains(ev.x, ev.y)) {
                 child->handleXEvent(ev);
                 return;
             }
@@ -5118,6 +5171,7 @@ void Neu_Splitter::handleXEvent(XEvent& ev)
 
     Neu_Control::handleXEvent(ev);
 }
+
 
 
 Neu_Window::Neu_Window(Neu_Application& app, int width, int height, const std::string& title)

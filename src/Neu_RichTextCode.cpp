@@ -473,6 +473,8 @@ void Neu_RichTextCode::draw(Display* display, Drawable drawable, GC gc, const Ne
     const int contentLeft = rect.x + 56;
     const int contentTop = rect.y + toolbarHeight + 10;
     const int contentWidth = std::max(1, rect.width - 74);
+    const Neu_Color effectiveFontColor = effectiveDefaultFontColor(theme);
+    const Neu_Color gutterTextColor{35, 45, 55, 255};
     int maxWidth = rect.width;
     int naturalHeight = toolbarHeight + 20;
 
@@ -520,7 +522,7 @@ void Neu_RichTextCode::draw(Display* display, Drawable drawable, GC gc, const Ne
     const size_t selB = selectionEnd();
 
     if (!richTextFragments().empty()) {
-        const auto lines = buildStyledLines(text_, richTextFragments_, defaultFontColor_);
+        const auto lines = buildStyledLines(text_, richTextFragments_, effectiveFontColor);
         for (const auto& line : lines) {
             const int lineHeight = std::max(18, line.height);
             const int baseline = yTop + lineHeight - 5;
@@ -548,7 +550,7 @@ void Neu_RichTextCode::draw(Display* display, Drawable drawable, GC gc, const Ne
                                     run.text,
                                     x,
                                     baseline,
-                                    run.style.useFontColor ? run.style.fontColor : defaultFontColor_,
+                                    run.style.useFontColor ? run.style.fontColor : effectiveFontColor,
                                     run.style.bold,
                                     run.style.italic,
                                     run.style.underline,
@@ -599,7 +601,7 @@ void Neu_RichTextCode::draw(Display* display, Drawable drawable, GC gc, const Ne
             for (const auto& visualLine : lines) {
                 maxWidth = std::max(maxWidth, measureTextWidth(display, drawable, gc, theme, visualLine, false, false, true) + 80);
                 if (y >= rect.y + toolbarHeight + 14 && y < rect.y + rect.height - 6) {
-                    drawText(display, drawable, gc, theme, std::to_string(lineNo), rect.x + 8, y);
+                    drawTextColored(display, drawable, gc, theme, std::to_string(lineNo), rect.x + 8, y, gutterTextColor);
                     if (startsWithKeyword(line, "#include") || startsWithKeyword(line, "class") || startsWithKeyword(line, "int") || startsWithKeyword(line, "void") || startsWithKeyword(line, "auto")) {
                         XSetForeground(display, gc, Neu_Pixel(display, sketchHighlightColor_));
                         XFillRectangle(display, drawable, gc, rect.x + 50, y - 14, rect.width - 64, lineHeight);
@@ -621,7 +623,7 @@ void Neu_RichTextCode::draw(Display* display, Drawable drawable, GC gc, const Ne
                                     wordWrap_ ? visualLine : truncateTextToWidth(display, drawable, gc, theme, visualLine, contentWidth + scrollX()),
                                     contentLeft - scrollX(),
                                     y,
-                                    defaultFontColor_,
+                                    effectiveFontColor,
                                     false,
                                     false,
                                     false,

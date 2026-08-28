@@ -658,7 +658,8 @@ public:
     void setToolbarVisible(bool visible) { toolbarVisible_ = visible; requestRedraw(); }
     bool toolbarVisible() const { return toolbarVisible_; }
     void setDefaultFontName(const std::string& fontName) { defaultFontName_ = fontName; requestRedraw(); }
-    void setDefaultFontColor(const Neu_Color& color) { defaultFontColor_ = color; requestRedraw(); }
+    void setDefaultFontColor(const Neu_Color& color) { defaultFontColor_ = color; defaultFontColorExplicit_ = true; requestRedraw(); }
+    void clearDefaultFontColorOverride() { defaultFontColorExplicit_ = false; requestRedraw(); }
     void setDefaultBackgroundColor(const Neu_Color& color) { defaultBackgroundColor_ = color; requestRedraw(); }
     void setSketchHighlightColor(const Neu_Color& color) { sketchHighlightColor_ = color; requestRedraw(); }
     void applyToolbarAction(int actionIndex);
@@ -682,8 +683,10 @@ private:
     std::string languageName_{"C++17"};
     std::string defaultFontName_;
     Neu_Color defaultFontColor_{20,28,38,255};
+    bool defaultFontColorExplicit_{false};
+    Neu_Color effectiveDefaultFontColor(const Neu_Theme& theme) const { return defaultFontColorExplicit_ ? defaultFontColor_ : theme.text; }
     Neu_Color defaultBackgroundColor_{255,255,255,0};
-    Neu_Color sketchHighlightColor_{255,240,120,160};
+    Neu_Color sketchHighlightColor_{42,112,178,160};
     std::vector<std::string> toolbarFonts_{"Sans", "Serif", "SansSerif", "Monospace"};
     int toolbarFontIndex_{0};
 };
@@ -939,13 +942,21 @@ public:
     using Neu_Placement::Neu_Placement;
     const char* className() const override { return "Neu_Splitter"; }
     void setVertical(bool vertical) { vertical_ = vertical; requestRedraw(); }
-    void setSplitPosition(int pixels) { splitPosition_ = std::max(24, pixels); requestRedraw(); }
+    void setSplitPosition(int pixels) { splitPosition_ = std::max(minimumPaneSize_, pixels); requestRedraw(); }
     int splitPosition() const { return splitPosition_; }
+    void setMinimumPaneSize(int pixels) { minimumPaneSize_ = std::max(0, pixels); setSplitPosition(splitPosition_); }
+    void setMinimumPaneWidth(int pixels) { setMinimumPaneSize(pixels); }
+    void setMinimumPaneHeight(int pixels) { setMinimumPaneSize(pixels); }
+    int minimumPaneSize() const { return minimumPaneSize_; }
+    void setSashSize(int pixels) { sashSize_ = std::max(3, pixels); requestRedraw(); }
+    int sashSize() const { return sashSize_; }
     void draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme) override;
     void handleXEvent(XEvent& ev) override;
 private:
     bool vertical_{true};
     int splitPosition_{160};
+    int minimumPaneSize_{48};
+    int sashSize_{6};
     bool dragging_{false};
 };
 

@@ -10,13 +10,13 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    Neu_Window win(app, 1120, 720, "Neutrino Test 16 - Stage2 Tabs, Toolbar and Splitter");
+    Neu_Window win(app, 1120, 790, "Neutrino Test 17 - Stage2 Tabs, Toolbar and Splitter");
     apply_test_window_defaults(win);
     if (!win.create()) {
         return 1;
     }
 
-    auto status = add_status(win, "Tabs, toolbar, and splitter/sash controls. Click toolbar buttons and switch tabs.");
+    auto status = add_status(win, "Tabs, toolbar, vertical splitter and horizontal splitter. Drag sashes to verify minimum pane size and clipping.");
 
     auto toolbar = std::make_shared<Neu_ToolBar>(Neu_Layout{28, 72, 1040, 54});
     toolbar->setHintText("Neu_ToolBar is a fixed-position placement container for menu/flat buttons.");
@@ -62,20 +62,40 @@ int main(int argc, char** argv)
     tabs->addTab("List Page", page3);
     win.add(tabs);
 
-    auto splitter = std::make_shared<Neu_Splitter>(Neu_Layout{28, 438, 1040, 170});
-    splitter->setSplitPosition(410);
-    splitter->setHintText("Neu_Splitter mirrors Swing JSplitPane and SWT Sash style dragging while children stay fixed-position.");
-    auto left = std::make_shared<Neu_MultilineLabel>(Neu_Layout{42, 452, 360, 128});
+    auto splitter = std::make_shared<Neu_Splitter>(Neu_Layout{28, 438, 1040, 150});
+    splitter->setMinimumPaneWidth(140);
+    splitter->setSashSize(8);
+    splitter->setSplitPosition(500);
+    splitter->setHintText("Vertical Neu_Splitter: drag the sash across the fixed child starts. The child controls must be clipped, not overdrawn.");
+    auto left = std::make_shared<Neu_MultilineLabel>(Neu_Layout{42, 452, 420, 108});
     left->setBorderVisible(true);
     left->setWordWrap(true);
     left->setText("Left fixed pane: drag the splitter bar. This is a visual sash; no new layout scheme is introduced.");
     splitter->add(left);
-    auto right = std::make_shared<Neu_MultilineLabel>(Neu_Layout{455, 452, 580, 128});
+    auto right = std::make_shared<Neu_MultilineLabel>(Neu_Layout{455, 452, 580, 108});
     right->setBorderVisible(true);
     right->setWordWrap(true);
     right->setText("Right fixed pane: clipping and redraw should work on Windows and Linux.");
     splitter->add(right);
     win.add(splitter);
+
+    auto horizontalSplitter = std::make_shared<Neu_Splitter>(Neu_Layout{28, 610, 1040, 120});
+    horizontalSplitter->setVertical(false);
+    horizontalSplitter->setMinimumPaneHeight(42);
+    horizontalSplitter->setSashSize(8);
+    horizontalSplitter->setSplitPosition(78);
+    horizontalSplitter->setHintText("Horizontal Neu_Splitter: drag up/down. The top and bottom controls stay clipped when the sash crosses them.");
+    auto topPane = std::make_shared<Neu_MultilineLabel>(Neu_Layout{42, 620, 980, 62});
+    topPane->setBorderVisible(true);
+    topPane->setWordWrap(true);
+    topPane->setText("Top fixed pane: horizontal splitter minimum height prevents collapsing below 42 px. Drag the sash through this text to test clipping.");
+    horizontalSplitter->add(topPane);
+    auto bottomPane = std::make_shared<Neu_MultilineLabel>(Neu_Layout{42, 682, 980, 38});
+    bottomPane->setBorderVisible(true);
+    bottomPane->setWordWrap(true);
+    bottomPane->setText("Bottom fixed pane: remains clipped when the sash moves past its start.");
+    horizontalSplitter->add(bottomPane);
+    win.add(horizontalSplitter);
 
     win.show();
     app.run();

@@ -2,6 +2,7 @@
 #include <X11/keysym.h>
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 
 namespace neutrino {
 
@@ -119,6 +120,65 @@ static bool primaryButtonPress(const XEvent& ev)
 static bool primaryButtonRelease(const XEvent& ev)
 {
     return ev.type == ButtonRelease && ev.xbutton.button == Button1;
+}
+
+static int clampSplitterPosition(const Neu_Rect& rect, bool vertical, int requested, int minimumPaneSize, int sashSize)
+{
+    const int extent = std::max(1, vertical ? rect.width : rect.height);
+    const int halfSash = std::max(1, sashSize / 2);
+    const int minPane = std::max(0, minimumPaneSize);
+    const int low = 4 + minPane + halfSash;
+    const int high = extent - 4 - minPane - halfSash;
+    if (high < low) {
+        return std::max(4 + halfSash, extent / 2);
+    }
+    return std::max(low, std::min(requested, high));
+}
+
+static XRectangle splitterPaneRect(const Neu_Rect& rect, bool vertical, bool firstPane, int split, int sashSize)
+{
+    const int halfSash = std::max(1, sashSize / 2);
+    if (vertical) {
+        const int x = firstPane ? rect.x + 4 : rect.x + split + halfSash;
+        const int right = firstPane ? rect.x + split - halfSash : rect.x + rect.width - 4;
+        return XRectangle{static_cast<short>(x),
+                          static_cast<short>(rect.y + 4),
+                          static_cast<unsigned short>(std::max(0, right - x)),
+                          static_cast<unsigned short>(std::max(0, rect.height - 8))};
+    }
+    const int y = firstPane ? rect.y + 4 : rect.y + split + halfSash;
+    const int bottom = firstPane ? rect.y + split - halfSash : rect.y + rect.height - 4;
+    return XRectangle{static_cast<short>(rect.x + 4),
+                      static_cast<short>(y),
+                      static_cast<unsigned short>(std::max(0, rect.width - 8)),
+                      static_cast<unsigned short>(std::max(0, bottom - y))};
+}
+
+static bool splitterChildInFirstPane(const Neu_Rect& rect,
+                                     const Neu_Rect& childRect,
+                                     bool vertical,
+                                     size_t childIndex,
+                                     size_t childCount,
+                                     int split)
+{
+    if (childCount <= 1U) {
+        return true;
+    }
+    if (childIndex == 0U) {
+        return true;
+    }
+    if (childIndex == 1U) {
+        return false;
+    }
+    const int splitAbs = vertical ? rect.x + split : rect.y + split;
+    return vertical ? childRect.x < splitAbs : childRect.y < splitAbs;
+}
+
+static bool pointInPaneRect(const XRectangle& pane, int x, int y)
+{
+    return pane.width > 0 && pane.height > 0 &&
+           x >= pane.x && x < pane.x + static_cast<int>(pane.width) &&
+           y >= pane.y && y < pane.y + static_cast<int>(pane.height);
 }
 
 } // namespace
@@ -428,52 +488,57 @@ void Neu_Splitter::draw(Display* display, Drawable drawable, GC gc, const Neu_Th
 {
     Neu_Control::draw(display, drawable, gc, theme);
     const auto rect = bounds();
-    const int sash = 5;
-    const int split = vertical_ ? std::max(24, std::min(splitPosition_, rect.width - 24))
-                                : std::max(24, std::min(splitPosition_, rect.height - 24));
-
-    XRectangle firstPane{};
-    XRectangle secondPane{};
-    if (vertical_) {
-        firstPane = XRectangle{static_cast<short>(rect.x + 4),
-                               static_cast<short>(rect.y + 4),
-                               static_cast<unsigned short>(std::max(1, split - sash - 4)),
-                               static_cast<unsigned short>(std::max(1, rect.height - 8))};
-        secondPane = XRectangle{static_cast<short>(rect.x + split + sash),
-                                static_cast<short>(rect.y + 4),
-                                static_cast<unsigned short>(std::max(1, rect.width - split - sash - 8)),
-                                static_cast<unsigned short>(std::max(1, rect.height - 8))};
-    } else {
-        firstPane = XRectangle{static_cast<short>(rect.x + 4),
-                               static_cast<short>(rect.y + 4),
-                               static_cast<unsigned short>(std::max(1, rect.width - 8)),
-                               static_cast<unsigned short>(std::max(1, split - sash - 4))};
-        secondPane = XRectangle{static_cast<short>(rect.x + 4),
-                                static_cast<short>(rect.y + split + sash),
-                                static_cast<unsigned short>(std::max(1, rect.width - 8)),
-                                static_cast<unsigned short>(std::max(1, rect.height - split - sash - 8))};
+    const int sash = std::max(3, sashSize_);
+    const int halfSash = std::max(1, sash / 2);
+    const int split = clampSplitterPosition(rect, vertical_, splitPosition_, minimumPaneSize_, sash);
+    if (split != splitPosition_) {
+        splitPosition_ = split;
     }
 
-    for (auto& child : children()) {
+    const XRectangle firstPane = splitterPaneRect(rect, vertical_, true, split, sash);
+    const XRectangle secondPane = splitterPaneRect(rect, vertical_, false, split, sash);
+    const int bufferWidth = std::max(rect.x + rect.width + 8, parent() ? parent()->width() : rect.x + rect.width + 8);
+    const int bufferHeight = std::max(rect.y + rect.height + 8, parent() ? parent()->height() : rect.y + rect.height + 8);
+    const int depth = DefaultDepth(display, DefaultScreen(display));
+    const size_t childCount = children().size();
+
+    for (size_t index = 0; index < childCount; ++index) {
+        auto& child = children()[index];
         if (!child || !child->visible()) {
             continue;
         }
         const auto childRect = child->bounds();
-        const bool inFirstPane = vertical_ ? (childRect.x + childRect.width / 2 < rect.x + split)
-                                           : (childRect.y + childRect.height / 2 < rect.y + split);
+        const bool inFirstPane = splitterChildInFirstPane(rect, childRect, vertical_, index, childCount, split);
         XRectangle pane = inFirstPane ? firstPane : secondPane;
-        XSetClipRectangles(display, gc, 0, 0, &pane, 1, Unsorted);
-        child->draw(display, drawable, gc, theme);
-        XSetClipMask(display, gc, None);
+        if (pane.width == 0 || pane.height == 0) {
+            continue;
+        }
+
+        // X11 controls often reset the GC clip internally while drawing text or scrollbars.
+        // Draw into a scratch pixmap and copy back only the pane rectangle so a child is
+        // still visibly clipped when the sash crosses its start position or interior.
+        Pixmap scratch = XCreatePixmap(display, drawable, static_cast<unsigned int>(bufferWidth), static_cast<unsigned int>(bufferHeight), depth);
+        if (scratch) {
+            XSetClipMask(display, gc, None);
+            XCopyArea(display, drawable, scratch, gc, 0, 0, static_cast<unsigned int>(bufferWidth), static_cast<unsigned int>(bufferHeight), 0, 0);
+            child->draw(display, scratch, gc, theme);
+            XSetClipMask(display, gc, None);
+            XCopyArea(display, scratch, drawable, gc, pane.x, pane.y, pane.width, pane.height, pane.x, pane.y);
+            XFreePixmap(display, scratch);
+        } else {
+            XSetClipRectangles(display, gc, 0, 0, &pane, 1, Unsorted);
+            child->draw(display, drawable, gc, theme);
+            XSetClipMask(display, gc, None);
+        }
     }
 
     XSetForeground(display, gc, Neu_Pixel(display, theme.accent));
     if (vertical_) {
         const int x = rect.x + split;
-        XFillRectangle(display, drawable, gc, x - 2, rect.y + 4, 4, std::max(1, rect.height - 8));
+        XFillRectangle(display, drawable, gc, x - halfSash, rect.y + 4, static_cast<unsigned int>(sash), std::max(1, rect.height - 8));
     } else {
         const int y = rect.y + split;
-        XFillRectangle(display, drawable, gc, rect.x + 4, y - 2, std::max(1, rect.width - 8), 4);
+        XFillRectangle(display, drawable, gc, rect.x + 4, y - halfSash, std::max(1, rect.width - 8), static_cast<unsigned int>(sash));
     }
     drawHintPopup(display, drawable, gc, theme);
 }
@@ -483,13 +548,13 @@ void Neu_Splitter::handleXEvent(XEvent& ev)
     const auto rect = bounds();
     const int ex = eventX(ev);
     const int ey = eventY(ev);
-    const int sash = 5;
-    const int split = vertical_ ? std::max(24, std::min(splitPosition_, rect.width - 24))
-                                : std::max(24, std::min(splitPosition_, rect.height - 24));
+    const int sash = std::max(3, sashSize_);
+    const int halfSash = std::max(1, sash / 2);
+    const int split = clampSplitterPosition(rect, vertical_, splitPosition_, minimumPaneSize_, sash);
 
     const bool onSash = vertical_
-                        ? (ex >= rect.x + split - sash && ex <= rect.x + split + sash && ey >= rect.y && ey <= rect.y + rect.height)
-                        : (ey >= rect.y + split - sash && ey <= rect.y + split + sash && ex >= rect.x && ex <= rect.x + rect.width);
+                        ? (ex >= rect.x + split - halfSash - 2 && ex <= rect.x + split + halfSash + 2 && ey >= rect.y && ey <= rect.y + rect.height)
+                        : (ey >= rect.y + split - halfSash - 2 && ey <= rect.y + split + halfSash + 2 && ex >= rect.x && ex <= rect.x + rect.width);
 
     if (primaryButtonPress(ev) && onSash) {
         dragging_ = true;
@@ -504,18 +569,18 @@ void Neu_Splitter::handleXEvent(XEvent& ev)
     }
 
     if (ev.type == MotionNotify || ev.type == ButtonPress || ev.type == ButtonRelease) {
+        const size_t childCount = children().size();
         for (auto it = children().rbegin(); it != children().rend(); ++it) {
+            const size_t reverseIndex = static_cast<size_t>(std::distance(children().rbegin(), it));
+            const size_t childIndex = childCount - 1U - reverseIndex;
             auto& child = *it;
             if (!child || !child->visible() || !child->enabled()) {
                 continue;
             }
             const auto childRect = child->bounds();
-            const bool firstPane = vertical_ ? (childRect.x + childRect.width / 2 < rect.x + split)
-                                             : (childRect.y + childRect.height / 2 < rect.y + split);
-            const bool pointInPane = vertical_
-                                     ? (firstPane ? ex < rect.x + split - sash : ex > rect.x + split + sash)
-                                     : (firstPane ? ey < rect.y + split - sash : ey > rect.y + split + sash);
-            if (pointInPane && child->contains(ex, ey)) {
+            const bool firstPane = splitterChildInFirstPane(rect, childRect, vertical_, childIndex, childCount, split);
+            XRectangle pane = splitterPaneRect(rect, vertical_, firstPane, split, sash);
+            if (pointInPaneRect(pane, ex, ey) && child->contains(ex, ey)) {
                 child->handleXEvent(ev);
                 return;
             }
