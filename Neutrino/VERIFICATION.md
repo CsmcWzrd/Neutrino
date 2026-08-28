@@ -166,3 +166,101 @@ make -f Makefile.autoconf -j2 build-autoconf/libNeutrino.a     build-autoconf/ne
 ```
 
 The Visual Studio 2022 solution contains matching Stage2 projects and remains configured for standard C++17 and `_CRT_SECURE_NO_WARNINGS`.
+## Stage2 text selection and clipboard fix
+
+Editable text controls now preserve repeated spaces/indentation and support `Ctrl+A`, `Ctrl+C`, `Ctrl+X`, `Ctrl+V`, Shift+arrow selection, and selection-aware Backspace/Delete. See `STAGE2_TEXT_SELECTION_CLIPBOARD_FIXES.md`.
+
+
+## Stage2 popup visibility verification
+
+Verified after adding `Neu_PopWindowMenu::show()`, `showAt()`, `hide()`, `toggle()`, and `isVisible()`:
+
+```sh
+make -j2 build/libNeutrino.a build/neutrino_test_07_popup_menu_categories
+cmake -S . -B /mnt/data/cmake-neutrino-popup
+cmake --build /mnt/data/cmake-neutrino-popup --target Neutrino neutrino_test_07_popup_menu_categories -j2
+make -f Makefile.autoconf -j2 build-autoconf/libNeutrino.a build-autoconf/neutrino_test_07_popup_menu_categories
+```
+
+## Stage2 rich text toolbar / text selection verification
+
+Verified after the rich text toolbar and editing-key update:
+
+```sh
+make -j2 build/libNeutrino.a
+make -j2 build/neutrino_test_02_text_inputs build/neutrino_test_08_richtext_code
+cmake -S . -B /mnt/data/cmake-neutrino-toolbar-undo
+cmake --build /mnt/data/cmake-neutrino-toolbar-undo --target Neutrino neutrino_test_02_text_inputs neutrino_test_08_richtext_code -j2
+make -f Makefile.autoconf -j2 build-autoconf/libNeutrino.a build-autoconf/neutrino_test_02_text_inputs build-autoconf/neutrino_test_08_richtext_code
+```
+
+## Stage2 toolbar, text editing, and Wayland preference verification
+
+Verified after the toolbar/selection/Wayland update:
+
+```sh
+NEUTRINO_USE_X11=0 make -j2 build/libNeutrino.a \
+    build/neutrino_test_02_text_inputs \
+    build/neutrino_test_08_richtext_code
+
+NEUTRINO_USE_X11=0 cmake -S . -B /mnt/data/cmake-neutrino-toolbar-drag-wayland
+cmake --build /mnt/data/cmake-neutrino-toolbar-drag-wayland --target Neutrino \
+    neutrino_test_02_text_inputs \
+    neutrino_test_08_richtext_code -j2
+
+./autogen.sh
+NEUTRINO_USE_X11=0 ./configure
+NEUTRINO_USE_X11=0 make -f Makefile.autoconf -j2 \
+    build-autoconf/libNeutrino.a \
+    build-autoconf/neutrino_test_02_text_inputs \
+    build-autoconf/neutrino_test_08_richtext_code
+```
+
+
+## Stage2 rich text focused test verification
+
+The latest verification includes:
+
+```sh
+make -j2 build/neutrino_test_20_full_richtext_control build/neutrino_test_21_full_richtext_code_control
+cmake --build <build-dir> --target neutrino_test_20_full_richtext_control neutrino_test_21_full_richtext_code_control
+make -f Makefile.autoconf -j2 build-autoconf/neutrino_test_20_full_richtext_control build-autoconf/neutrino_test_21_full_richtext_code_control
+```
+
+
+## Stage2 text navigation and selection update
+
+See `STAGE2_TEXT_NAV_SELECTION_FIXES.md` for the multiline/rich-text cursor movement and selection highlight fix pass.
+
+## Stage2 rich text selection/formatting verification
+
+Verified Linux build targets after patching rich text selection coordinates and toolbar formatting range behavior:
+
+```sh
+make -j2 build/libNeutrino.a build/neutrino_test_20_full_richtext_control build/neutrino_test_21_full_richtext_code_control
+cmake -S . -B /mnt/data/cmake-neutrino-richselection
+cmake --build /mnt/data/cmake-neutrino-richselection --target Neutrino neutrino_test_20_full_richtext_control neutrino_test_21_full_richtext_code_control -j2
+make -f Makefile.autoconf -j2 build-autoconf/libNeutrino.a build-autoconf/neutrino_test_20_full_richtext_control build-autoconf/neutrino_test_21_full_richtext_code_control
+```
+
+The VS2022 source path was patched in `src/win32/Neu_Win32.cpp`; MSVC is not available in this Linux container.
+
+## Stage2 rich text inline/toggle formatting verification
+
+Verified Linux build targets after the rich text inline-fragment and toggle-formatting update:
+
+```sh
+make -j2 build/libNeutrino.a \
+  build/neutrino_test_20_full_richtext_control \
+  build/neutrino_test_21_full_richtext_code_control
+
+cmake -S . -B /mnt/data/cmake-neutrino-rich-toggle
+cmake --build /mnt/data/cmake-neutrino-rich-toggle --target Neutrino \
+  neutrino_test_20_full_richtext_control \
+  neutrino_test_21_full_richtext_code_control -j2
+
+make -f Makefile.autoconf -j2 \
+  build-autoconf/libNeutrino.a \
+  build-autoconf/neutrino_test_20_full_richtext_control \
+  build-autoconf/neutrino_test_21_full_richtext_code_control
+```

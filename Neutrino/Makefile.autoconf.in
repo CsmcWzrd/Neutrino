@@ -5,6 +5,10 @@ CXXFLAGS = @CXXFLAGS@ -std=c++17 -Wall -Wextra -O2
 XFT_CFLAGS := $(shell pkg-config --cflags xft 2>/dev/null)
 XFT_LIBS := $(shell pkg-config --libs xft 2>/dev/null)
 XFT_CPPFLAGS := $(if $(XFT_LIBS),-DNEUTRINO_USE_XFT $(XFT_CFLAGS),)
+# Wayland is preferred unless NEUTRINO_USE_X11=1 is set. NEUTRINO_USE_X11=0 also prefers Wayland.
+WAYLAND_CFLAGS := $(if $(filter 1,$(NEUTRINO_USE_X11)),,$(shell pkg-config --cflags wayland-client 2>/dev/null))
+WAYLAND_LIBS := $(if $(filter 1,$(NEUTRINO_USE_X11)),,$(shell pkg-config --libs wayland-client 2>/dev/null))
+WAYLAND_CPPFLAGS := $(if $(WAYLAND_LIBS),-DNEUTRINO_PREFER_WAYLAND $(WAYLAND_CFLAGS),)
 CPPFLAGS = @CPPFLAGS@ -Iinclude
 LDFLAGS = @LDFLAGS@
 X11_LIBS = @X11_LIBS@
@@ -12,6 +16,7 @@ DL_LIBS = @DL_LIBS@
 SRC = src/Neu_Application.cpp \
     src/Neu_AdditionalControls.cpp \
     src/Neu_Button.cpp \
+    src/Neu_Cards.cpp \
     src/Neu_ComboBox.cpp \
     src/Neu_Control.cpp \
     src/Neu_Graphics.cpp \
@@ -61,7 +66,10 @@ EXAMPLES = build-autoconf/neutrino_demo \
     build-autoconf/neutrino_test_16_value_controls \
     build-autoconf/neutrino_test_17_tabs_toolbar_splitter \
     build-autoconf/neutrino_test_18_stage2_scroll_controls \
-    build-autoconf/neutrino_test_19_material_beauty
+    build-autoconf/neutrino_test_19_material_beauty \
+    build-autoconf/neutrino_test_20_full_richtext_control \
+    build-autoconf/neutrino_test_21_full_richtext_code_control \
+    build-autoconf/neutrino_test_22_cards
 
 all: $(LIB) $(EXAMPLES)
 
@@ -69,35 +77,35 @@ build-autoconf:
 	mkdir -p build-autoconf
 
 build-autoconf/%.o: src/%.cpp include/Neutrino/Neutrino.hpp | build-autoconf
-	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(XFT_CPPFLAGS) -c $< -o $@
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(WAYLAND_CPPFLAGS) $(XFT_CPPFLAGS) -c $< -o $@
 
 $(LIB): $(OBJ)
 	$(AR) rcs $@ $^
 	$(RANLIB) $@
 
 build-autoconf/%: examples/%.cpp $(LIB)
-	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(XFT_CPPFLAGS) $< $(LIB) $(LDFLAGS) $(X11_LIBS) $(DL_LIBS) $(XFT_LIBS) -o $@
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(WAYLAND_CPPFLAGS) $(XFT_CPPFLAGS) $< $(LIB) $(LDFLAGS) $(WAYLAND_LIBS) $(X11_LIBS) $(DL_LIBS) $(XFT_LIBS) -o $@
 
 build-autoconf/neutrino_demo: examples/demo.cpp $(LIB)
-	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(XFT_CPPFLAGS) $< $(LIB) $(LDFLAGS) $(X11_LIBS) $(DL_LIBS) $(XFT_LIBS) -o $@
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(WAYLAND_CPPFLAGS) $(XFT_CPPFLAGS) $< $(LIB) $(LDFLAGS) $(WAYLAND_LIBS) $(X11_LIBS) $(DL_LIBS) $(XFT_LIBS) -o $@
 
 build-autoconf/neutrino_test_all_controls: examples/test_all_controls.cpp $(LIB)
-	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(XFT_CPPFLAGS) $< $(LIB) $(LDFLAGS) $(X11_LIBS) $(DL_LIBS) $(XFT_LIBS) -o $@
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(WAYLAND_CPPFLAGS) $(XFT_CPPFLAGS) $< $(LIB) $(LDFLAGS) $(WAYLAND_LIBS) $(X11_LIBS) $(DL_LIBS) $(XFT_LIBS) -o $@
 
 build-autoconf/neutrino_test_windows: examples/test_windows.cpp $(LIB)
-	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(XFT_CPPFLAGS) $< $(LIB) $(LDFLAGS) $(X11_LIBS) $(DL_LIBS) $(XFT_LIBS) -o $@
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(WAYLAND_CPPFLAGS) $(XFT_CPPFLAGS) $< $(LIB) $(LDFLAGS) $(WAYLAND_LIBS) $(X11_LIBS) $(DL_LIBS) $(XFT_LIBS) -o $@
 
 build-autoconf/neutrino_test_typed_views: examples/test_typed_views.cpp $(LIB)
-	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(XFT_CPPFLAGS) $< $(LIB) $(LDFLAGS) $(X11_LIBS) $(DL_LIBS) $(XFT_LIBS) -o $@
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(WAYLAND_CPPFLAGS) $(XFT_CPPFLAGS) $< $(LIB) $(LDFLAGS) $(WAYLAND_LIBS) $(X11_LIBS) $(DL_LIBS) $(XFT_LIBS) -o $@
 
 build-autoconf/neutrino_test_smooth_graphics: examples/test_smooth_graphics.cpp $(LIB)
-	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(XFT_CPPFLAGS) $< $(LIB) $(LDFLAGS) $(X11_LIBS) $(DL_LIBS) $(XFT_LIBS) -o $@
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(WAYLAND_CPPFLAGS) $(XFT_CPPFLAGS) $< $(LIB) $(LDFLAGS) $(WAYLAND_LIBS) $(X11_LIBS) $(DL_LIBS) $(XFT_LIBS) -o $@
 
 build-autoconf/neutrino_test_treeview_collapse: examples/test_treeview_collapse.cpp $(LIB)
-	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(XFT_CPPFLAGS) $< $(LIB) $(LDFLAGS) $(X11_LIBS) $(DL_LIBS) $(XFT_LIBS) -o $@
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(WAYLAND_CPPFLAGS) $(XFT_CPPFLAGS) $< $(LIB) $(LDFLAGS) $(WAYLAND_LIBS) $(X11_LIBS) $(DL_LIBS) $(XFT_LIBS) -o $@
 
 build-autoconf/neutrino_test_heavy_data: examples/test_heavy_data.cpp $(LIB)
-	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(XFT_CPPFLAGS) $< $(LIB) $(LDFLAGS) $(X11_LIBS) $(DL_LIBS) $(XFT_LIBS) -o $@
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(WAYLAND_CPPFLAGS) $(XFT_CPPFLAGS) $< $(LIB) $(LDFLAGS) $(WAYLAND_LIBS) $(X11_LIBS) $(DL_LIBS) $(XFT_LIBS) -o $@
 
 install:
 	mkdir -p $(DESTDIR)/usr/local/lib $(DESTDIR)/usr/local/bin $(DESTDIR)/usr/local/include/Neutrino $(DESTDIR)/usr/local/share/Neutrino/assets

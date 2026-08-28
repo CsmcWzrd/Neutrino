@@ -1,11 +1,7 @@
 {
   "Version": 1,
-  "WorkspaceRootPath": "C:\\Projects\\WinProjects\\Neutrino\\msvc\\",
-  "Documents": [
-    {
-      "AbsoluteMoniker": "D:0:0:{5A029784-8721-4EAD-89B1-69A93A9B3BA4}|Neutrino.vcxproj|C:\\Projects\\WinProjects\\Neutrino\\src\\win32\\Neu_Win32.cpp||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}"
-    }
-  ],
+  "WorkspaceRootPath": "E:\\VS2022Projects\\Neutrino\\msvc\\",
+  "Documents": [],
   "DocumentGroupContainers": [
     {
       "Orientation": 0,
@@ -13,24 +9,11 @@
       "DocumentGroups": [
         {
           "DockedWidth": 200,
-          "SelectedChildIndex": 1,
+          "SelectedChildIndex": -1,
           "Children": [
             {
               "$type": "Bookmark",
               "Name": "ST:0:0:{cce594b6-0c39-4442-ba28-10c64ac7e89f}"
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 0,
-              "Title": "Neu_Win32.cpp",
-              "DocumentMoniker": "C:\\Projects\\WinProjects\\Neutrino\\src\\win32\\Neu_Win32.cpp",
-              "RelativeDocumentMoniker": "..\\src\\win32\\Neu_Win32.cpp",
-              "ToolTip": "C:\\Projects\\WinProjects\\Neutrino\\src\\win32\\Neu_Win32.cpp",
-              "RelativeToolTip": "..\\src\\win32\\Neu_Win32.cpp",
-              "ViewState": "AgIAAOEFAAAAAAAAAAAhwO8FAAAWAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000677|",
-              "WhenOpened": "2026-07-02T21:50:43.719Z",
-              "EditorCaption": ""
             }
           ]
         }

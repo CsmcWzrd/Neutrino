@@ -67,6 +67,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\src/win32/Neu_Win32.cpp" />
+    <ClCompile Include="..\src\Neu_Cards.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

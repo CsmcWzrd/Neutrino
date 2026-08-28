@@ -14,6 +14,7 @@ endfunction()
 if(WIN32)
     add_library(Neutrino STATIC
         src/win32/Neu_Win32.cpp
+        src/Neu_Cards.cpp
     )
     target_include_directories(Neutrino PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
     target_compile_definitions(Neutrino PUBLIC WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE _CRT_SECURE_NO_WARNINGS)
@@ -23,15 +24,25 @@ if(WIN32)
     target_link_libraries(neutrino_win32_demo PRIVATE Neutrino)
     list(APPEND Neutrino_EXAMPLE_TARGETS neutrino_win32_demo)
 else()
-    find_package(X11 REQUIRED)
     find_package(PkgConfig QUIET)
+    set(NEUTRINO_FORCE_X11 FALSE)
+    if("$ENV{NEUTRINO_USE_X11}" STREQUAL "1")
+        set(NEUTRINO_FORCE_X11 TRUE)
+    endif()
     if(PkgConfig_FOUND)
+        if(NOT NEUTRINO_FORCE_X11)
+            # Prefer Wayland-capable builds. The current Stage2 renderer still keeps
+            # X11/XWayland available for drawing compatibility.
+            pkg_check_modules(WAYLAND_CLIENT QUIET wayland-client)
+        endif()
         pkg_check_modules(XFT QUIET xft)
     endif()
+    find_package(X11 REQUIRED)
     add_library(Neutrino STATIC
         src/Neu_Application.cpp
         src/Neu_AdditionalControls.cpp
         src/Neu_Button.cpp
+        src/Neu_Cards.cpp
         src/Neu_ComboBox.cpp
         src/Neu_Control.cpp
         src/Neu_Graphics.cpp
@@ -60,6 +71,14 @@ else()
         target_compile_definitions(Neutrino PUBLIC NEUTRINO_USE_XFT)
         target_include_directories(Neutrino PUBLIC ${XFT_INCLUDE_DIRS})
         target_link_libraries(Neutrino PUBLIC ${XFT_LIBRARIES})
+    endif()
+    if(WAYLAND_CLIENT_FOUND)
+        target_compile_definitions(Neutrino PUBLIC NEUTRINO_PREFER_WAYLAND)
+        target_include_directories(Neutrino PUBLIC ${WAYLAND_CLIENT_INCLUDE_DIRS})
+        target_link_libraries(Neutrino PUBLIC ${WAYLAND_CLIENT_LIBRARIES})
+        message(STATUS "Neutrino: Wayland-capable build preferred; set NEUTRINO_USE_X11=1 to force X11 runtime preference")
+    else()
+        message(STATUS "Neutrino: Wayland client metadata not found; using X11/XWayland-compatible build")
     endif()
     target_link_libraries(Neutrino PUBLIC ${X11_LIBRARIES} ${CMAKE_DL_LIBS})
 endif()
@@ -90,7 +109,12 @@ neutrino_add_example(neutrino_test_16_value_controls examples/neutrino_test_16_v
 neutrino_add_example(neutrino_test_17_tabs_toolbar_splitter examples/neutrino_test_17_tabs_toolbar_splitter.cpp)
 neutrino_add_example(neutrino_test_18_stage2_scroll_controls examples/neutrino_test_18_stage2_scroll_controls.cpp)
 neutrino_add_example(neutrino_test_19_material_beauty examples/neutrino_test_19_material_beauty.cpp)
+neutrino_add_example(neutrino_test_20_full_richtext_control examples/neutrino_test_20_full_richtext_control.cpp)
+neutrino_add_example(neutrino_test_21_full_richtext_code_control examples/neutrino_test_21_full_richtext_code_control.cpp)
+
+neutrino_add_example(neutrino_test_22_cards examples/neutrino_test_22_cards.cpp)
 
 install(TARGETS Neutrino ${Neutrino_EXAMPLE_TARGETS} ARCHIVE DESTINATION lib RUNTIME DESTINATION bin)
 install(DIRECTORY include/Neutrino DESTINATION include)
 install(DIRECTORY assets DESTINATION share/Neutrino)
+

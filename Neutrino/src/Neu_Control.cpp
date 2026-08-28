@@ -3,6 +3,10 @@
 #include <algorithm>
 #include <vector>
 #include <cctype>
+#include <cstdlib>
+#include <cstring>
+#include <map>
+#include <tuple>
 
 #ifdef NEUTRINO_USE_XFT
 #include <X11/Xft/Xft.h>
@@ -51,6 +55,234 @@ static std::string xftFontName(const Neu_Theme& theme,
     return font;
 }
 
+static bool envFlag(const char* name, bool defaultValue)
+{
+    const char* value = std::getenv(name);
+    if (!value || !*value) {
+        return defaultValue;
+    }
+    if (std::strcmp(value, "0") == 0 || std::strcmp(value, "false") == 0 || std::strcmp(value, "FALSE") == 0 || std::strcmp(value, "no") == 0 || std::strcmp(value, "NO") == 0) {
+        return false;
+    }
+    return true;
+}
+
+static bool envEquals(const char* name, const char* expected)
+{
+    const char* value = std::getenv(name);
+    return value && std::strcmp(value, expected) == 0;
+}
+
+enum class X11TextBackend { Core, Xft, Auto, DualFallback };
+
+static X11TextBackend x11TextBackend()
+{
+    // Use exactly one text backend by default.  The previous Linux text fix kept
+    // a core-font safety pass enabled after successful Xft drawing, which made
+    // every label appear twice with a small offset and doubled text-rendering
+    // work.  Core/Xutf8 is the safest default for VM, Xvfb and older X11
+    // servers.  Developers who want Xft anti-aliased text can explicitly set:
+    //   NEUTRINO_X11_TEXT_BACKEND=xft
+    // or use auto to try Xft and fall back only when Xft cannot draw.
+    const char* value = std::getenv("NEUTRINO_X11_TEXT_BACKEND");
+    if (value && *value) {
+        if (std::strcmp(value, "xft") == 0 || std::strcmp(value, "Xft") == 0) {
+            return X11TextBackend::Xft;
+        }
+        if (std::strcmp(value, "auto") == 0 || std::strcmp(value, "AUTO") == 0) {
+            return X11TextBackend::Auto;
+        }
+        if (std::strcmp(value, "dual") == 0 || std::strcmp(value, "fallback") == 0) {
+            return X11TextBackend::DualFallback;
+        }
+    }
+    if (envFlag("NEUTRINO_DISABLE_XFT", false)
+        || envEquals("NEUTRINO_X11_TEXT_BACKEND", "core")
+        || envEquals("NEUTRINO_X11_TEXT_BACKEND", "xlib")) {
+        return X11TextBackend::Core;
+    }
+    return X11TextBackend::Core;
+}
+
+static bool useXftText()
+{
+    const X11TextBackend backend = x11TextBackend();
+    return backend == X11TextBackend::Xft
+           || backend == X11TextBackend::Auto
+           || backend == X11TextBackend::DualFallback;
+}
+
+static bool allowCoreTextFallback()
+{
+    // Off by default to prevent duplicate/overlapped text.  Only the explicit
+    // dual/fallback backend draws a second core-font pass after successful Xft.
+    return x11TextBackend() == X11TextBackend::DualFallback
+           || envFlag("NEUTRINO_X11_TEXT_CORE_FALLBACK", false);
+}
+
+static bool xrenderExtensionAvailable(Display* display)
+{
+    if (!display) {
+        return false;
+    }
+    int opcode = 0;
+    int event = 0;
+    int error = 0;
+    return XQueryExtension(display, "RENDER", &opcode, &event, &error) != 0;
+}
+
+static XFontStruct* coreFont(Display* display, bool monospace, int headingLevel)
+{
+    if (!display) {
+        return nullptr;
+    }
+    const int sizeKey = headingLevel > 0 ? 1 : 0;
+    static std::map<std::tuple<Display*, bool, int>, XFontStruct*> cache;
+    const auto key = std::make_tuple(display, monospace, sizeKey);
+    auto found = cache.find(key);
+    if (found != cache.end()) {
+        return found->second;
+    }
+
+    const char* largeCandidates[] = {
+        "10x20",
+        "9x15",
+        "fixed",
+        "*-fixed-*-*-*-*-20-*-*-*-*-*-iso10646-1",
+        "*-fixed-*-*-*-*-20-*-*-*-*-*-iso8859-1",
+        nullptr
+    };
+    const char* normalCandidates[] = {
+        "9x15",
+        "8x13",
+        "fixed",
+        "*-fixed-*-*-*-*-13-*-*-*-*-*-iso10646-1",
+        "*-fixed-*-*-*-*-13-*-*-*-*-*-iso8859-1",
+        nullptr
+    };
+    const char** candidates = sizeKey ? largeCandidates : normalCandidates;
+    XFontStruct* font = nullptr;
+    for (int i = 0; candidates[i] && !font; ++i) {
+        font = XLoadQueryFont(display, candidates[i]);
+    }
+    cache[key] = font;
+    return font;
+}
+
+static XFontSet coreFontSet(Display* display)
+{
+    if (!display || envFlag("NEUTRINO_X11_TEXT_NO_FONTSET", false)) {
+        return nullptr;
+    }
+    static std::map<Display*, XFontSet> cache;
+    auto found = cache.find(display);
+    if (found != cache.end()) {
+        return found->second;
+    }
+
+    const char* candidates[] = {
+        "-*-fixed-*-*-*-*-*-*-*-*-*-*-iso10646-1",
+        "-*-fixed-*-*-*-*-*-*-*-*-*-*-*",
+        "fixed",
+        nullptr
+    };
+
+    XFontSet set = nullptr;
+    for (int i = 0; candidates[i] && !set; ++i) {
+        char** missing = nullptr;
+        int missingCount = 0;
+        char* defaultString = nullptr;
+        set = XCreateFontSet(display, candidates[i], &missing, &missingCount, &defaultString);
+        if (missing) {
+            XFreeStringList(missing);
+        }
+    }
+    cache[display] = set;
+    return set;
+}
+
+static int measureCoreTextWidth(Display* display,
+                                GC gc,
+                                const std::string& text,
+                                bool bold,
+                                bool monospace,
+                                int headingLevel)
+{
+    if (display) {
+        if (XFontSet set = coreFontSet(display)) {
+            XRectangle ink{};
+            XRectangle logical{};
+            Xutf8TextExtents(set, text.c_str(), static_cast<int>(text.size()), &ink, &logical);
+            return std::max(0, static_cast<int>(logical.width)) + (bold ? 1 : 0);
+        }
+        if (XFontStruct* font = coreFont(display, monospace, headingLevel)) {
+            return std::max(0, XTextWidth(font, text.c_str(), static_cast<int>(text.size()))) + (bold ? 1 : 0);
+        }
+        if (gc) {
+            XFontStruct* font = XQueryFont(display, XGContextFromGC(gc));
+            if (font) {
+                const int width = XTextWidth(font, text.c_str(), static_cast<int>(text.size())) + (bold ? 1 : 0);
+                XFreeFontInfo(nullptr, font, 1);
+                return std::max(0, width);
+            }
+        }
+    }
+    int charWidth = monospace ? 8 : 7;
+    if (bold) {
+        ++charWidth;
+    }
+    if (headingLevel > 0) {
+        charWidth += std::max(1, 8 - headingLevel);
+    }
+    return static_cast<int>(text.size()) * charWidth;
+}
+
+static void drawCoreText(Display* display,
+                         Drawable drawable,
+                         GC gc,
+                         const std::string& text,
+                         int x,
+                         int y,
+                         const Neu_Color& color,
+                         bool bold,
+                         bool underline,
+                         bool strikethrough,
+                         bool doubleStrikethrough,
+                         bool monospace,
+                         int headingLevel)
+{
+    if (!display || !gc || text.empty()) {
+        return;
+    }
+    XSetForeground(display, gc, Neu_Pixel(display, color));
+
+    if (XFontSet set = coreFontSet(display)) {
+        Xutf8DrawString(display, drawable, set, gc, x, y, text.c_str(), static_cast<int>(text.size()));
+        if (bold) {
+            Xutf8DrawString(display, drawable, set, gc, x + 1, y, text.c_str(), static_cast<int>(text.size()));
+        }
+    } else {
+        if (XFontStruct* font = coreFont(display, monospace, headingLevel)) {
+            XSetFont(display, gc, font->fid);
+        }
+        XDrawString(display, drawable, gc, x, y, text.c_str(), static_cast<int>(text.size()));
+        if (bold) {
+            XDrawString(display, drawable, gc, x + 1, y, text.c_str(), static_cast<int>(text.size()));
+        }
+    }
+
+    const int width = measureCoreTextWidth(display, gc, text, bold, monospace, headingLevel);
+    if (underline) {
+        XDrawLine(display, drawable, gc, x, y + 2, x + width, y + 2);
+    }
+    if (strikethrough || doubleStrikethrough) {
+        XDrawLine(display, drawable, gc, x, y - 6, x + width, y - 6);
+        if (doubleStrikethrough) {
+            XDrawLine(display, drawable, gc, x, y - 3, x + width, y - 3);
+        }
+    }
+}
+
 static std::vector<std::string> logicalLines(const std::string& text)
 {
     std::vector<std::string> out;
@@ -97,7 +329,7 @@ void Neu_Control::requestRedraw()
 
 int Neu_Control::measureTextWidth(Display* display,
                                   Drawable drawable,
-                                  GC,
+                                  GC gc,
                                   const Neu_Theme& theme,
                                   const std::string& text,
                                   bool bold,
@@ -105,8 +337,9 @@ int Neu_Control::measureTextWidth(Display* display,
                                   bool monospace,
                                   int headingLevel) const
 {
+(void)drawable;
 #ifdef NEUTRINO_USE_XFT
-    if (display) {
+    if (display && useXftText() && xrenderExtensionAvailable(display)) {
         XftFont* font = XftFontOpenName(display,
                                         DefaultScreen(display),
                                         xftFontName(theme, bold, italic, monospace, headingLevel).c_str());
@@ -121,17 +354,11 @@ int Neu_Control::measureTextWidth(Display* display,
             return std::max(0, static_cast<int>(extents.xOff));
         }
     }
+#else
+    (void)theme;
+    (void)italic;
 #endif
-    (void)display;
-    (void)drawable;
-    int charWidth = monospace ? 8 : 7;
-    if (bold) {
-        ++charWidth;
-    }
-    if (headingLevel > 0) {
-        charWidth += std::max(1, 8 - headingLevel);
-    }
-    return static_cast<int>(text.size()) * charWidth;
+    return measureCoreTextWidth(display, gc, text, bold, monospace, headingLevel);
 }
 
 std::vector<std::string> Neu_Control::wrapTextToWidth(Display* display,
@@ -148,36 +375,35 @@ std::vector<std::string> Neu_Control::wrapTextToWidth(Display* display,
     }
 
     for (const auto& logical : logicalLines(text)) {
-        std::string current;
-        std::string word;
-        std::istringstream input(logical);
-        while (input >> word) {
-            const std::string candidate = current.empty() ? word : current + " " + word;
-            if (!current.empty() && measureTextWidth(display, drawable, gc, theme, candidate) > maxWidth) {
-                wrapped.push_back(current);
-                current.clear();
-            }
+        if (logical.empty()) {
+            wrapped.push_back({});
+            continue;
+        }
 
-            if (measureTextWidth(display, drawable, gc, theme, word) > maxWidth) {
-                std::string part;
-                for (char ch : word) {
-                    const std::string c2 = part + ch;
-                    if (!part.empty() && measureTextWidth(display, drawable, gc, theme, c2) > maxWidth) {
-                        wrapped.push_back(part);
-                        part.clear();
+        std::string current;
+        size_t lastBreak = std::string::npos;
+        for (size_t i = 0; i < logical.size(); ++i) {
+            const char ch = logical[i];
+            const std::string candidate = current + ch;
+            if (!current.empty() && measureTextWidth(display, drawable, gc, theme, candidate) > maxWidth) {
+                if (lastBreak != std::string::npos && lastBreak + 1 < current.size()) {
+                    wrapped.push_back(current.substr(0, lastBreak + 1));
+                    current = current.substr(lastBreak + 1);
+                    lastBreak = std::string::npos;
+                    for (size_t j = 0; j < current.size(); ++j) {
+                        if (current[j] == ' ' || current[j] == '\t') {
+                            lastBreak = j;
+                        }
                     }
-                    part.push_back(ch);
+                } else {
+                    wrapped.push_back(current);
+                    current.clear();
+                    lastBreak = std::string::npos;
                 }
-                if (!part.empty()) {
-                    if (current.empty()) {
-                        current = part;
-                    } else {
-                        wrapped.push_back(current);
-                        current = part;
-                    }
-                }
-            } else {
-                current = current.empty() ? word : current + " " + word;
+            }
+            current.push_back(ch);
+            if (ch == ' ' || ch == '\t') {
+                lastBreak = current.size() - 1;
             }
         }
         wrapped.push_back(current);
@@ -259,8 +485,9 @@ void Neu_Control::drawTextColored(Display* display,
                                   bool monospace,
                                   int headingLevel)
 {
+bool xftDrew = false;
 #ifdef NEUTRINO_USE_XFT
-    if (display) {
+    if (display && useXftText() && xrenderExtensionAvailable(display)) {
         XftDraw* xftDraw = XftDrawCreate(display,
                                          drawable,
                                          DefaultVisual(display, DefaultScreen(display)),
@@ -275,22 +502,24 @@ void Neu_Control::drawTextColored(Display* display,
             renderColor.blue = static_cast<unsigned short>(color.b * 257);
             renderColor.alpha = 0xffff;
             XftColor xftColor{};
-            XftColorAllocValue(display,
-                               DefaultVisual(display, DefaultScreen(display)),
-                               DefaultColormap(display, DefaultScreen(display)),
-                               &renderColor,
-                               &xftColor);
-            XftDrawStringUtf8(xftDraw,
-                              &xftColor,
-                              font,
-                              x,
-                              y,
-                              reinterpret_cast<const FcChar8*>(text.c_str()),
-                              static_cast<int>(text.size()));
-            XftColorFree(display,
-                         DefaultVisual(display, DefaultScreen(display)),
-                         DefaultColormap(display, DefaultScreen(display)),
-                         &xftColor);
+            if (XftColorAllocValue(display,
+                                   DefaultVisual(display, DefaultScreen(display)),
+                                   DefaultColormap(display, DefaultScreen(display)),
+                                   &renderColor,
+                                   &xftColor)) {
+                XftDrawStringUtf8(xftDraw,
+                                  &xftColor,
+                                  font,
+                                  x,
+                                  y,
+                                  reinterpret_cast<const FcChar8*>(text.c_str()),
+                                  static_cast<int>(text.size()));
+                XftColorFree(display,
+                             DefaultVisual(display, DefaultScreen(display)),
+                             DefaultColormap(display, DefaultScreen(display)),
+                             &xftColor);
+                xftDrew = true;
+            }
         }
         if (font) {
             XftFontClose(display, font);
@@ -298,7 +527,7 @@ void Neu_Control::drawTextColored(Display* display,
         if (xftDraw) {
             XftDrawDestroy(xftDraw);
         }
-        if (font) {
+        if (xftDrew) {
             const int width = measureTextWidth(display, drawable, gc, theme, text, bold, italic, monospace, headingLevel);
             XSetForeground(display, gc, Neu_Pixel(display, color));
             if (underline) {
@@ -310,25 +539,30 @@ void Neu_Control::drawTextColored(Display* display,
                     XDrawLine(display, drawable, gc, x, y - 3, x + width, y - 3);
                 }
             }
-            return;
+            if (!allowCoreTextFallback()) {
+                return;
+            }
         }
     }
+#else
+    (void)theme;
+    (void)italic;
 #endif
 
-    XSetForeground(display, gc, Neu_Pixel(display, color));
-    XDrawString(display, drawable, gc, x, y, text.c_str(), static_cast<int>(text.size()));
-    const int width = measureTextWidth(display, drawable, gc, theme, text, bold, italic, monospace, headingLevel);
-    if (bold) {
-        XDrawString(display, drawable, gc, x + 1, y, text.c_str(), static_cast<int>(text.size()));
-    }
-    if (underline) {
-        XDrawLine(display, drawable, gc, x, y + 2, x + width, y + 2);
-    }
-    if (strikethrough || doubleStrikethrough) {
-        XDrawLine(display, drawable, gc, x, y - 6, x + width, y - 6);
-        if (doubleStrikethrough) {
-            XDrawLine(display, drawable, gc, x, y - 3, x + width, y - 3);
-        }
+    if (!xftDrew || allowCoreTextFallback()) {
+        drawCoreText(display,
+                     drawable,
+                     gc,
+                     text,
+                     x,
+                     y,
+                     color,
+                     bold,
+                     underline && !xftDrew,
+                     strikethrough && !xftDrew,
+                     doubleStrikethrough && !xftDrew,
+                     monospace,
+                     headingLevel);
     }
 }
 
@@ -637,8 +871,13 @@ void Neu_Control::setScrollOffset(int x, int y)
     const auto rect = bounds();
     const int maxX = std::max(0, virtualSize_.width - rect.width);
     const int maxY = std::max(0, virtualSize_.height - rect.height);
-    scrollX_ = std::max(0, std::min(x, maxX));
-    scrollY_ = std::max(0, std::min(y, maxY));
+    const int newScrollX = std::max(0, std::min(x, maxX));
+    const int newScrollY = std::max(0, std::min(y, maxY));
+    if (newScrollX == scrollX_ && newScrollY == scrollY_) {
+        return;
+    }
+    scrollX_ = newScrollX;
+    scrollY_ = newScrollY;
     if (callbacks_.onScroll) {
         callbacks_.onScroll(this, scrollX_, scrollY_, callbacks_.userData);
     }

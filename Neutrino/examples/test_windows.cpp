@@ -21,14 +21,14 @@ static void on_open_dialog(Neu_Control*, void* user_data) {
 
 static void on_theme_light(Neu_Control* sender, void*) {
     if (sender->parent()) {
-        sender->parent()->setTheme(Neu_Theme::Light());
+        sender->parent()->setTheme(Neu_Theme::MaterialDark());
         sender->parent()->redraw();
     }
 }
 
 static void on_theme_dark(Neu_Control* sender, void*) {
     if (sender->parent()) {
-        sender->parent()->setTheme(Neu_Theme::Dark());
+        sender->parent()->setTheme(Neu_Theme::MaterialDark());
         sender->parent()->redraw();
     }
 }
@@ -41,12 +41,12 @@ int main() {
     }
 
     Neu_Window main_win(app, 760, 480, "Neutrino Test - Windows and Dialogs");
-    main_win.setTheme(Neu_Theme::Light());
+    main_win.setTheme(Neu_Theme::MaterialDark());
     main_win.setOnClose(on_close, nullptr);
     if (!main_win.create()) return 1;
 
     Neu_Window dialog(app, 480, 320, "Neutrino Dialog Window");
-    dialog.setTheme(Neu_Theme::Dark());
+    dialog.setTheme(Neu_Theme::MaterialDark());
     dialog.setOnClose(on_close, nullptr);
     if (!dialog.create()) return 1;
 

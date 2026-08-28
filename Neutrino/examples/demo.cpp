@@ -35,7 +35,7 @@ int main(int argc, char** argv) {
     }
 
     Neu_Window win(app, 900, 620, "Neutrino Demo");
-    win.setTheme(Neu_Theme::BlueGlass());
+    win.setTheme(Neu_Theme::MaterialDark());
     if (!win.create()) return 1;
 
     auto textbox = std::make_shared<Neu_Textbox>(Neu_Layout{30, 30, 270, 36, 1.0f, 400, 60});

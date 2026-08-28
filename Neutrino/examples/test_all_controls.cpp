@@ -38,7 +38,7 @@ int main(int argc, char** argv) {
     }
 
     Neu_Window win(app, 1120, 760, "Neutrino Test - All Controls");
-    win.setTheme(Neu_Theme::BlueGlass());
+    win.setTheme(Neu_Theme::MaterialDark());
     if (!win.create()) return 1;
 
     auto status = std::make_shared<Neu_Textbox>(Neu_Layout{25, 20, 520, 36, 1.0f, 620, 48});

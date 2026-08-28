@@ -64,4 +64,22 @@ cmake --build build-vs2022 --config Release
 ## Visual Studio project settings
 
 Every `msvc/*.vcxproj` file uses Visual Studio 2022 toolset `v143`, C++17 mode via `<LanguageStandard>stdcpp17</LanguageStandard>`, Unicode character set, `/utf-8`, and `_CRT_SECURE_NO_WARNINGS` in both Debug and Release configurations.
+## Stage2 text selection and clipboard fix
 
+Editable text controls now preserve repeated spaces/indentation and support `Ctrl+A`, `Ctrl+C`, `Ctrl+X`, `Ctrl+V`, Shift+arrow selection, and selection-aware Backspace/Delete. See `STAGE2_TEXT_SELECTION_CLIPBOARD_FIXES.md`.
+
+
+
+## Stage2 rich text focused tests
+
+- `neutrino_test_20_full_richtext_control`: full-window rich-text editing, toolbar formatting, selection, clipboard, drag selection, and undo/redo.
+- `neutrino_test_21_full_richtext_code_control`: full-window code-oriented rich text editor with toolbar formatting, code text, selection, clipboard, and undo/redo.
+
+
+## Stage2 text navigation and selection update
+
+See `STAGE2_TEXT_NAV_SELECTION_FIXES.md` for the multiline/rich-text cursor movement and selection highlight fix pass.
+
+## Test 22 - Neu_Cards
+
+`neutrino_test_22_cards` verifies the Neu_Cards list-like card control, card level indentation, primary item icons at the beginning and end, text-only detail item rows, simple rich text markers, scrolling and selection callbacks.

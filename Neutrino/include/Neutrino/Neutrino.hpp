@@ -68,6 +68,40 @@ enum class Neu_AntiAliasMode {
     SSAA   // super-sample shape antialiasing
 };
 
+enum class Neu_FontFamily {
+    Sans,
+    Serif,
+    SansSerif,
+    Monospace
+};
+
+enum class Neu_Backend {
+    Auto,
+    Wayland,
+    X11,
+    Win32
+};
+
+struct Neu_TextEditSnapshot {
+    std::string text;
+    size_t cursor{0};
+    size_t selectionStart{0};
+    size_t selectionEnd{0};
+    int scrollX{0};
+    int scrollY{0};
+};
+
+inline std::string Neu_FontFamilyName(Neu_FontFamily family)
+{
+    switch (family) {
+    case Neu_FontFamily::Serif: return "Serif";
+    case Neu_FontFamily::SansSerif: return "SansSerif";
+    case Neu_FontFamily::Monospace: return "Monospace";
+    case Neu_FontFamily::Sans:
+    default: return "Sans";
+    }
+}
+
 struct Neu_TextOffset {
     int top{2};
     int right{4};
@@ -117,7 +151,7 @@ struct Neu_Theme {
     Neu_Color background{18,18,18,255};
     Neu_Color glass{30,30,34,235};
     Neu_Color border{62,66,74,255};
-    Neu_Color text{238,238,238,255};
+    Neu_Color text{232,234,237,255};
     Neu_Color accent{144,202,249,255};
     Neu_Color hover{42,44,50,255};
     Neu_Color pressed{56,60,68,255};
@@ -141,6 +175,9 @@ struct Neu_Theme {
     int shadowOffsetX{3};
     int shadowOffsetY{4};
     std::string fontName{"DejaVu Sans:size=10:antialias=true:hinting=true:hintstyle=hintfull:rgba=rgb:lcdfilter=lcddefault"};
+    Neu_FontFamily fontFamily{Neu_FontFamily::Sans};
+    void setFontFamily(Neu_FontFamily family) { fontFamily = family; fontName = Neu_FontFamilyName(family); }
+    void setFontFamily(Neu_FontFamily family, const std::string& concreteFontName) { fontFamily = family; fontName = concreteFontName.empty() ? Neu_FontFamilyName(family) : concreteFontName; }
     void setAllCorners(Neu_CornerStyle style) { topLeftCorner = style; topRightCorner = style; bottomLeftCorner = style; bottomRightCorner = style; }
     void setCornerStyles(Neu_CornerStyle topLeft, Neu_CornerStyle topRight, Neu_CornerStyle bottomLeft, Neu_CornerStyle bottomRight) { topLeftCorner = topLeft; topRightCorner = topRight; bottomLeftCorner = bottomLeft; bottomRightCorner = bottomRight; }
     void setRoundedCorners() { setAllCorners(Neu_CornerStyle::RoundedCorner); }
@@ -242,8 +279,12 @@ public:
     bool hasWindows() const { return !windows_.empty(); }
     static Neu_Application* current();
     bool xrenderAvailable() const { return xrenderAvailable_; }
+    Neu_Backend backend() const { return backend_; }
+    bool usingWayland() const { return backend_ == Neu_Backend::Wayland; }
+    const std::string& backendName() const { return backendName_; }
 private:
     bool detectXRender();
+    bool detectWayland();
 #ifdef _WIN32
     Display* display_{nullptr};
     int screen_{0};
@@ -252,7 +293,11 @@ private:
     Display* display_{nullptr};
     int screen_{0};
     bool xrenderAvailable_{false};
+    void* xrenderLibrary_{nullptr};
 #endif
+    Neu_Backend backend_{Neu_Backend::Auto};
+    std::string backendName_{"auto"};
+    bool waylandAvailable_{false};
     bool running_{false};
     std::vector<Neu_Window*> windows_;
     static Neu_Application* current_;
@@ -289,7 +334,7 @@ public:
     void addRichTextFragment(const Neu_TextFragment& fragment) { richTextFragments_.push_back(fragment); requestRedraw(); }
     void clearRichTextFragments() { richTextFragments_.clear(); requestRedraw(); }
     const std::vector<Neu_TextFragment>& richTextFragments() const { return richTextFragments_; }
-    void setAutoScroll(bool enabled) { autoScroll_ = enabled; requestRedraw(); }
+    void setAutoScroll(bool enabled) { if (autoScroll_ != enabled) { autoScroll_ = enabled; requestRedraw(); } }
     bool autoScroll() const { return autoScroll_; }
     void setScrollOffset(int x, int y);
     int scrollX() const { return scrollX_; }
@@ -369,9 +414,40 @@ public:
     const char* className() const override { return "Neu_Textbox"; }
     void draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme) override;
     void handleXEvent(XEvent& ev) override;
+    void selectAll();
+    void clearSelection();
+    void setSelection(size_t start, size_t end);
+    bool hasSelection() const;
+    void undo();
+    void redo();
+    bool canUndo() const { return !undoStack_.empty(); }
+    bool canRedo() const { return !redoStack_.empty(); }
+    std::string selectedText() const;
+    size_t selectionStart() const { return std::min(selectionStart_, selectionEnd_); }
+    size_t selectionEnd() const { return std::max(selectionStart_, selectionEnd_); }
+    void setInsertMode(bool enabled) { insertMode_ = enabled; requestRedraw(); }
+    bool insertMode() const { return insertMode_; }
 protected:
+    void replaceSelectionWith(const std::string& text);
+    void deleteSelection();
+    void moveCursorWithSelection(size_t newCursor, bool extendSelection);
+    void pushUndoSnapshot();
+    void restoreEditSnapshot(const Neu_TextEditSnapshot& snapshot);
     size_t cursor_{0};
     int textScrollX_{0};
+    size_t selectionStart_{0};
+    size_t selectionEnd_{0};
+    std::vector<Neu_TextEditSnapshot> undoStack_;
+    std::vector<Neu_TextEditSnapshot> redoStack_;
+    size_t undoLimit_{256};
+    bool insertMode_{false};
+    bool mouseSelecting_{false};
+    size_t mouseSelectAnchor_{0};
+    bool mouseDraggingSelectedText_{false};
+    size_t dragSourceStart_{0};
+    size_t dragSourceEnd_{0};
+    size_t dragDropCursor_{0};
+    std::string dragText_;
 };
 
 class Neu_Passwordbox : public Neu_Textbox {
@@ -414,6 +490,8 @@ class Neu_ComboBox : public Neu_Listbox {
 public:
     using Neu_Listbox::Neu_Listbox;
     const char* className() const override { return "Neu_ComboBox"; }
+    bool isDropDownOpen() const { return open_; }
+    void closeDropDown() { open_ = false; requestRedraw(); }
     void draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme) override;
     void handleXEvent(XEvent& ev) override;
 private:
@@ -506,14 +584,27 @@ class Neu_PopWindowMenu : public Neu_Placement {
 public:
     using Neu_Placement::Neu_Placement;
     const char* className() const override { return "Neu_PopWindowMenu"; }
-    void setCategories(const std::vector<std::string>& categories) { categories_ = categories; }
-    void setItems(const std::string& category, const std::vector<std::string>& items) { items_[category] = items; }
+    void setCategories(const std::vector<std::string>& categories) { categories_ = categories; requestRedraw(); }
+    void setItems(const std::string& category, const std::vector<std::string>& items) { items_[category] = items; requestRedraw(); }
+
+    // Popup visibility helpers. The menu remains visible by default for
+    // backwards compatibility with existing demos; applications can hide it
+    // after construction and open it explicitly through show()/showAt().
+    void show() { if (!visible_) { visible_ = true; requestRedraw(); } }
+    void showAt(int x, int y) { layout_.left = x; layout_.top = y; show(); }
+    void hide() { if (visible_) { visible_ = false; requestRedraw(); } }
+    void toggle() { if (visible_) { hide(); } else { show(); } }
+    bool isVisible() const { return visible_; }
+
     void draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme) override;
+    void handleXEvent(XEvent& ev) override;
 private:
     std::vector<std::string> categories_;
     std::map<std::string, std::vector<std::string>> items_;
     int selectedCategory_{0};
 };
+
+using Neu_PopupWindowMenu = Neu_PopWindowMenu;
 
 
 class Neu_ScrollBar : public Neu_Control {
@@ -570,9 +661,22 @@ public:
     void setDefaultFontColor(const Neu_Color& color) { defaultFontColor_ = color; requestRedraw(); }
     void setDefaultBackgroundColor(const Neu_Color& color) { defaultBackgroundColor_ = color; requestRedraw(); }
     void setSketchHighlightColor(const Neu_Color& color) { sketchHighlightColor_ = color; requestRedraw(); }
+    void applyToolbarAction(int actionIndex);
+    void applyBold() { applyToolbarAction(0); }
+    void applyItalic() { applyToolbarAction(1); }
+    void applyUnderline() { applyToolbarAction(2); }
+    void applyStrikethrough() { applyToolbarAction(3); }
+    void applyDoubleStrikethrough() { applyToolbarAction(4); }
+    void applyHeading(int level);
+    void applyMonospace() { applyToolbarAction(7); }
+    void cycleToolbarFont() { applyToolbarAction(8); }
+    void applyFontColor(const Neu_Color& color);
+    void applyBackgroundColor(const Neu_Color& color);
+    void applyHighlightColor(const Neu_Color& color);
     void draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme) override;
     void handleXEvent(XEvent& ev) override;
 private:
+    void applyFragmentStyleToSelection(const Neu_TextFragment& style);
     bool readOnly_{false};
     bool toolbarVisible_{true};
     std::string languageName_{"C++17"};
@@ -580,6 +684,8 @@ private:
     Neu_Color defaultFontColor_{20,28,38,255};
     Neu_Color defaultBackgroundColor_{255,255,255,0};
     Neu_Color sketchHighlightColor_{255,240,120,160};
+    std::vector<std::string> toolbarFonts_{"Sans", "Serif", "SansSerif", "Monospace"};
+    int toolbarFontIndex_{0};
 };
 
 class Neu_ProgressSquare : public Neu_Control {
@@ -599,6 +705,92 @@ public:
     const char* className() const override { return "Neu_ImageView"; }
     bool loadBmp(const std::string& path) { setIconBmp(path); return icon().width() > 0; }
     void draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme) override;
+};
+
+
+
+enum class Neu_CardIconPosition {
+    Beginning,
+    End
+};
+
+struct Neu_CardItem {
+    std::wstring text;
+    std::string iconPath;
+    Neu_CardIconPosition iconPosition{Neu_CardIconPosition::Beginning};
+    bool simpleRichText{true};
+
+    Neu_CardItem() = default;
+    explicit Neu_CardItem(std::wstring value);
+    Neu_CardItem(std::wstring value, std::string icon, Neu_CardIconPosition position = Neu_CardIconPosition::Beginning);
+    void setText(const std::wstring& value) { text = value; }
+    void setTextUtf8(const std::string& value) { text = toWide(value); }
+    void setIcon(const std::string& path, Neu_CardIconPosition position = Neu_CardIconPosition::Beginning) { iconPath = path; iconPosition = position; }
+    static std::wstring toWide(const std::string& utf8);
+    static std::string toUtf8(const std::wstring& wide);
+};
+
+struct Neu_Card {
+    std::vector<Neu_CardItem> items;
+    int levelIndex{0};
+
+    Neu_Card() = default;
+    Neu_Card(std::vector<Neu_CardItem> cardItems, int level = 0);
+};
+
+class Neu_Cards : public Neu_Control {
+public:
+    explicit Neu_Cards(Neu_Layout layout = {});
+    const char* className() const override { return "Neu_Cards"; }
+
+    void setCards(const std::vector<Neu_Card>& cards);
+    void addCard(const Neu_Card& card);
+    void clearCards();
+    const std::vector<Neu_Card>& cards() const { return cards_; }
+
+    void setCardLevelOffset(int pixels);
+    int cardLevelOffset() const { return cardLevelOffset_; }
+    void setCardMinHeight(int pixels);
+    int cardMinHeight() const { return cardMinHeight_; }
+    void setCardPadding(int left, int top, int right, int bottom);
+    void setCardSpacing(int pixels);
+    int cardSpacing() const { return cardSpacing_; }
+    void setItemSpacing(int pixels);
+    int itemSpacing() const { return itemSpacing_; }
+    void setIconSize(int pixels);
+    int iconSize() const { return iconSize_; }
+    void setSelectable(bool selectable);
+    bool selectable() const { return selectable_; }
+    void setSelectedIndex(int index);
+    int selectedIndex() const { return selectedIndex_; }
+
+    void draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme) override;
+    void handleXEvent(XEvent& ev) override;
+
+private:
+    Neu_IconBmp* iconForPath(const std::string& path) const;
+    int cardHeight(const Neu_Card& card) const;
+    int cardAt(int px, int py) const;
+    std::string cardPrimaryTextUtf8(int index) const;
+    void drawStyledTextLine(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme, const std::string& text, int x, int baseline, int maxWidth, bool rich);
+
+    std::vector<Neu_Card> cards_;
+    mutable std::map<std::string, Neu_IconBmp> iconCache_;
+    int cardLevelOffset_{28};
+    int cardMinHeight_{48};
+    int cardSpacing_{8};
+    int itemSpacing_{2};
+    int iconSize_{20};
+    int iconSpacing_{8};
+    int itemLineHeight_{20};
+    int outerPadding_{8};
+    int cardPaddingLeft_{12};
+    int cardPaddingTop_{8};
+    int cardPaddingRight_{12};
+    int cardPaddingBottom_{8};
+    int selectedIndex_{-1};
+    int hoveredIndex_{-1};
+    bool selectable_{true};
 };
 
 class Neu_ReadOnlyRichText : public Neu_ScrollWindow {
@@ -773,6 +965,8 @@ public:
     void redraw();
     void invalidate();
     void requestRedraw();
+    bool hasPendingRedraw() const;
+    void flushPendingRedraw();
     void paint(Drawable target);
     void setMultiStageDoubleBuffering(bool enabled);
     bool multiStageDoubleBuffering() const { return multiStageDoubleBuffering_; }
@@ -801,6 +995,10 @@ private:
     Neu_Control* hoveredControl_{nullptr};
     Neu_Control* captureControl_{nullptr};
     bool closing_{false};
+    bool dirty_{false};
+    bool painting_{false};
+    bool redrawRequestedDuringPaint_{false};
+    bool mapped_{false};
     bool multiStageDoubleBuffering_{true};
 #ifdef _WIN32
     HDC memoryDc_{nullptr};
@@ -810,6 +1008,7 @@ private:
     Pixmap stageBackground_{0};
     Pixmap stageCompose_{0};
     Pixmap stageFinal_{0};
+    XFontStruct* coreFont_{nullptr};
 #endif
     int bufferWidth_{0};
     int bufferHeight_{0};
@@ -822,6 +1021,8 @@ private:
 
 unsigned long Neu_Pixel(Display* d, const Neu_Color& color);
 Neu_Color Neu_PixelToColor(Display* d, unsigned long pixel);
+const char* Neu_SelectedBackendName();
+bool Neu_IsWaylandBackendSelected();
 void Neu_SetSmoothGraphicsOptions(const Neu_SmoothGraphicsOptions& options);
 Neu_SmoothGraphicsOptions Neu_GetSmoothGraphicsOptions();
 void Neu_EnableAntialiasing(bool enabled);

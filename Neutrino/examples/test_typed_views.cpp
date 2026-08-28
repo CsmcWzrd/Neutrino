@@ -43,7 +43,7 @@ int main() {
     }
 
     Neu_Window win(app, 980, 620, "Neutrino Test - ListView and TreeView Typed Data");
-    win.setTheme(Neu_Theme::BlueGlass());
+    win.setTheme(Neu_Theme::MaterialDark());
     if (!win.create()) return 1;
 
     static Neu_StringTable model = {

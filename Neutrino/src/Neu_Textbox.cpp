@@ -1,9 +1,12 @@
 #include "Neutrino/Neutrino.hpp"
 #include <X11/keysym.h>
+#include <X11/Xutil.h>
 
 namespace neutrino {
 
 namespace {
+
+static std::string g_neuClipboardText;
 
 static void setClip(Display* display, GC gc, const Neu_Rect& rect, int inset)
 {
@@ -15,6 +18,152 @@ static void setClip(Display* display, GC gc, const Neu_Rect& rect, int inset)
 }
 
 } // namespace
+
+void Neu_Textbox::selectAll()
+{
+    selectionStart_ = 0;
+    selectionEnd_ = text_.size();
+    cursor_ = selectionEnd_;
+    requestRedraw();
+}
+
+void Neu_Textbox::clearSelection()
+{
+    selectionStart_ = cursor_;
+    selectionEnd_ = cursor_;
+    requestRedraw();
+}
+
+void Neu_Textbox::setSelection(size_t start, size_t end)
+{
+    selectionStart_ = std::min(start, text_.size());
+    selectionEnd_ = std::min(end, text_.size());
+    cursor_ = selectionEnd_;
+    requestRedraw();
+}
+
+bool Neu_Textbox::hasSelection() const
+{
+    return selectionStart_ != selectionEnd_;
+}
+
+std::string Neu_Textbox::selectedText() const
+{
+    if (!hasSelection()) {
+        return {};
+    }
+    const size_t a = selectionStart();
+    const size_t b = selectionEnd();
+    return text_.substr(a, b - a);
+}
+
+void Neu_Textbox::pushUndoSnapshot()
+{
+    Neu_TextEditSnapshot snapshot{text_, cursor_, selectionStart_, selectionEnd_, scrollX_, scrollY_};
+    if (!undoStack_.empty()) {
+        const auto& last = undoStack_.back();
+        if (last.text == snapshot.text && last.cursor == snapshot.cursor &&
+            last.selectionStart == snapshot.selectionStart && last.selectionEnd == snapshot.selectionEnd) {
+            return;
+        }
+    }
+    undoStack_.push_back(snapshot);
+    if (undoStack_.size() > undoLimit_) {
+        undoStack_.erase(undoStack_.begin());
+    }
+    redoStack_.clear();
+}
+
+void Neu_Textbox::restoreEditSnapshot(const Neu_TextEditSnapshot& snapshot)
+{
+    text_ = snapshot.text;
+    cursor_ = std::min(snapshot.cursor, text_.size());
+    selectionStart_ = std::min(snapshot.selectionStart, text_.size());
+    selectionEnd_ = std::min(snapshot.selectionEnd, text_.size());
+    scrollX_ = std::max(0, snapshot.scrollX);
+    scrollY_ = std::max(0, snapshot.scrollY);
+    invokeTextChanged();
+    requestRedraw();
+}
+
+void Neu_Textbox::undo()
+{
+    if (undoStack_.empty()) {
+        return;
+    }
+    redoStack_.push_back({text_, cursor_, selectionStart_, selectionEnd_, scrollX_, scrollY_});
+    Neu_TextEditSnapshot snapshot = undoStack_.back();
+    undoStack_.pop_back();
+    restoreEditSnapshot(snapshot);
+}
+
+void Neu_Textbox::redo()
+{
+    if (redoStack_.empty()) {
+        return;
+    }
+    undoStack_.push_back({text_, cursor_, selectionStart_, selectionEnd_, scrollX_, scrollY_});
+    Neu_TextEditSnapshot snapshot = redoStack_.back();
+    redoStack_.pop_back();
+    restoreEditSnapshot(snapshot);
+}
+
+void Neu_Textbox::deleteSelection()
+{
+    if (!hasSelection()) {
+        return;
+    }
+    pushUndoSnapshot();
+    const size_t a = selectionStart();
+    const size_t b = selectionEnd();
+    text_.erase(a, b - a);
+    cursor_ = a;
+    selectionStart_ = cursor_;
+    selectionEnd_ = cursor_;
+    invokeTextChanged();
+}
+
+void Neu_Textbox::replaceSelectionWith(const std::string& text)
+{
+    pushUndoSnapshot();
+    if (hasSelection()) {
+        const size_t a = selectionStart();
+        const size_t b = selectionEnd();
+        text_.replace(a, b - a, text);
+        cursor_ = a + text.size();
+    } else {
+        cursor_ = std::min(cursor_, text_.size());
+        if (insertMode_ && !text.empty() && text.find('\n') == std::string::npos && text.find('\r') == std::string::npos && cursor_ < text_.size()) {
+            const size_t overwriteCount = std::min(text.size(), text_.size() - cursor_);
+            size_t actual = 0;
+            while (actual < overwriteCount && cursor_ + actual < text_.size() && text_[cursor_ + actual] != '\n' && text_[cursor_ + actual] != '\r') {
+                ++actual;
+            }
+            text_.erase(cursor_, actual);
+        }
+        text_.insert(cursor_, text);
+        cursor_ += text.size();
+    }
+    selectionStart_ = cursor_;
+    selectionEnd_ = cursor_;
+    invokeTextChanged();
+}
+
+void Neu_Textbox::moveCursorWithSelection(size_t newCursor, bool extendSelection)
+{
+    newCursor = std::min(newCursor, text_.size());
+    if (extendSelection) {
+        if (!hasSelection()) {
+            selectionStart_ = cursor_;
+        }
+        selectionEnd_ = newCursor;
+    } else {
+        selectionStart_ = newCursor;
+        selectionEnd_ = newCursor;
+    }
+    cursor_ = newCursor;
+    requestRedraw();
+}
 
 void Neu_Textbox::draw(Display* display, Drawable drawable, GC gc, const Neu_Theme& theme)
 {
@@ -40,6 +189,15 @@ void Neu_Textbox::draw(Display* display, Drawable drawable, GC gc, const Neu_The
     }
 
     setClip(display, gc, rect, 4);
+    if (focused_ && hasSelection()) {
+        const size_t a = selectionStart();
+        const size_t b = selectionEnd();
+        const int sx = textLeft - textScrollX_ + measureTextWidth(display, drawable, gc, theme, text_.substr(0, a));
+        const int ex = textLeft - textScrollX_ + measureTextWidth(display, drawable, gc, theme, text_.substr(0, b));
+        XSetForeground(display, gc, Neu_Pixel(display, theme.highlight));
+        XFillRectangle(display, drawable, gc, std::min(sx, ex), rect.y + 6, std::max(1, std::abs(ex - sx)), rect.height - 12);
+    }
+
     if (focused_ || fullWidth > textWidth) {
         drawText(display, drawable, gc, theme, text_, textLeft - textScrollX_, textTop);
     } else {
@@ -64,57 +222,186 @@ void Neu_Textbox::draw(Display* display, Drawable drawable, GC gc, const Neu_The
 
 void Neu_Textbox::handleXEvent(XEvent& event)
 {
-    if (event.type == ButtonPress && contains(event.xbutton.x, event.xbutton.y)) {
+    auto cursorFromPoint = [&](int px) -> size_t {
         const auto rect = bounds();
-        const int localX = event.xbutton.x - (rect.x + 8) + textScrollX_;
-        cursor_ = 0;
+        const int localX = px - (rect.x + 8) + textScrollX_;
+        size_t newCursor = 0;
         for (size_t i = 1; i <= text_.size(); ++i) {
             if (measureTextWidth(nullptr, 0, 0, Neu_Theme{}, text_.substr(0, i)) <= localX) {
-                cursor_ = i;
+                newCursor = i;
             } else {
                 break;
             }
         }
+        return newCursor;
+    };
+
+    if (event.type == ButtonPress && contains(event.xbutton.x, event.xbutton.y)) {
+        const size_t newCursor = cursorFromPoint(event.xbutton.x);
+        if (!(event.xbutton.state & ShiftMask) && hasSelection() && newCursor >= selectionStart() && newCursor <= selectionEnd()) {
+            mouseDraggingSelectedText_ = true;
+            mouseSelecting_ = false;
+            dragSourceStart_ = selectionStart();
+            dragSourceEnd_ = selectionEnd();
+            dragText_ = selectedText();
+            dragDropCursor_ = newCursor;
+            cursor_ = newCursor;
+            requestRedraw();
+            return;
+        }
+        mouseDraggingSelectedText_ = false;
+        mouseSelecting_ = true;
+        mouseSelectAnchor_ = (event.xbutton.state & ShiftMask) ? selectionStart() : newCursor;
+        if (event.xbutton.state & ShiftMask) {
+            moveCursorWithSelection(newCursor, true);
+        } else {
+            moveCursorWithSelection(newCursor, false);
+            mouseSelectAnchor_ = newCursor;
+        }
+        return;
+    }
+
+    if (event.type == MotionNotify && focused_) {
+        const size_t newCursor = cursorFromPoint(event.xmotion.x);
+        if (mouseDraggingSelectedText_) {
+            dragDropCursor_ = newCursor;
+            cursor_ = newCursor;
+            requestRedraw();
+            return;
+        }
+        if (mouseSelecting_) {
+            selectionStart_ = mouseSelectAnchor_;
+            selectionEnd_ = newCursor;
+            cursor_ = newCursor;
+            requestRedraw();
+            return;
+        }
+    }
+
+    if (event.type == ButtonRelease && mouseDraggingSelectedText_) {
+        mouseDraggingSelectedText_ = false;
+        if (!dragText_.empty() && dragSourceStart_ < dragSourceEnd_ && dragSourceEnd_ <= text_.size()) {
+            size_t drop = std::min(dragDropCursor_, text_.size());
+            if (drop < dragSourceStart_ || drop > dragSourceEnd_) {
+                pushUndoSnapshot();
+                text_.erase(dragSourceStart_, dragSourceEnd_ - dragSourceStart_);
+                if (drop > dragSourceEnd_) {
+                    drop -= (dragSourceEnd_ - dragSourceStart_);
+                }
+                drop = std::min(drop, text_.size());
+                text_.insert(drop, dragText_);
+                cursor_ = drop + dragText_.size();
+                selectionStart_ = drop;
+                selectionEnd_ = cursor_;
+                invokeTextChanged();
+            }
+        }
+        dragText_.clear();
         requestRedraw();
+        return;
+    }
+
+    if (event.type == ButtonRelease && mouseSelecting_) {
+        mouseSelecting_ = false;
+        requestRedraw();
+        return;
     }
 
     if (event.type == KeyPress && focused_) {
-        char buffer[8] = {0};
+        char buffer[32] = {0};
         KeySym keySymbol = 0;
         const int count = XLookupString(&event.xkey, buffer, sizeof(buffer) - 1, &keySymbol, nullptr);
+        const bool ctrl = (event.xkey.state & ControlMask) != 0;
+        const bool shift = (event.xkey.state & ShiftMask) != 0;
+
+        if (ctrl && (keySymbol == XK_a || keySymbol == XK_A)) {
+            selectAll();
+            return;
+        }
+        if (ctrl && (keySymbol == XK_c || keySymbol == XK_C)) {
+            if (hasSelection()) {
+                g_neuClipboardText = selectedText();
+            }
+            return;
+        }
+        if (ctrl && (keySymbol == XK_x || keySymbol == XK_X)) {
+            if (hasSelection()) {
+                g_neuClipboardText = selectedText();
+                deleteSelection();
+            }
+            requestRedraw();
+            return;
+        }
+        if (ctrl && (keySymbol == XK_v || keySymbol == XK_V)) {
+            if (!g_neuClipboardText.empty()) {
+                replaceSelectionWith(g_neuClipboardText);
+            }
+            requestRedraw();
+            return;
+        }
+        if (ctrl && (keySymbol == XK_z || keySymbol == XK_Z)) {
+            if (shift) {
+                redo();
+            } else {
+                undo();
+            }
+            return;
+        }
+        if (ctrl && (keySymbol == XK_y || keySymbol == XK_Y)) {
+            redo();
+            return;
+        }
+        if ((event.xkey.state & Mod1Mask) && keySymbol == XK_BackSpace) {
+            // Alt+Backspace follows the common editing convention: Undo.
+            undo();
+            return;
+        }
+
+        if (keySymbol == XK_Insert) {
+            insertMode_ = !insertMode_;
+            requestRedraw();
+            return;
+        }
 
         if (keySymbol == XK_BackSpace) {
-            if (cursor_ > 0 && !text_.empty()) {
+            if (hasSelection()) {
+                deleteSelection();
+            } else if (cursor_ > 0 && !text_.empty()) {
+                pushUndoSnapshot();
                 text_.erase(cursor_ - 1, 1);
                 --cursor_;
+                clearSelection();
                 invokeTextChanged();
             }
         } else if (keySymbol == XK_Delete) {
-            if (cursor_ < text_.size()) {
+            if (hasSelection()) {
+                deleteSelection();
+            } else if (cursor_ < text_.size()) {
+                pushUndoSnapshot();
                 text_.erase(cursor_, 1);
+                clearSelection();
                 invokeTextChanged();
             }
         } else if (keySymbol == XK_Left) {
-            if (cursor_ > 0) {
-                --cursor_;
-            }
+            moveCursorWithSelection(cursor_ > 0 ? cursor_ - 1 : 0, shift);
         } else if (keySymbol == XK_Right) {
-            if (cursor_ < text_.size()) {
-                ++cursor_;
-            }
+            moveCursorWithSelection(cursor_ < text_.size() ? cursor_ + 1 : text_.size(), shift);
         } else if (keySymbol == XK_Home) {
-            cursor_ = 0;
+            moveCursorWithSelection(0, shift);
         } else if (keySymbol == XK_End) {
-            cursor_ = text_.size();
+            moveCursorWithSelection(text_.size(), shift);
+        } else if (keySymbol == XK_Page_Up) {
+            moveCursorWithSelection(0, shift);
+        } else if (keySymbol == XK_Page_Down) {
+            moveCursorWithSelection(text_.size(), shift);
         } else if (keySymbol == XK_Return) {
             // Single-line text boxes ignore Enter. Multiline boxes override this.
-        } else if (count > 0 && buffer[0] >= 32) {
-            text_.insert(cursor_, buffer, static_cast<size_t>(count));
-            cursor_ += static_cast<size_t>(count);
-            invokeTextChanged();
+        } else if (count > 0 && !ctrl && static_cast<unsigned char>(buffer[0]) >= 32) {
+            replaceSelectionWith(std::string(buffer, static_cast<size_t>(count)));
         }
 
         requestRedraw();
+        return;
     }
 
     Neu_Control::handleXEvent(event);
