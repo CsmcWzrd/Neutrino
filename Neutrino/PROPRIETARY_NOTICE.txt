@@ -1,5 +1,0 @@
-Neutrino Proprietary Notice
-
-This software package and its source code are proprietary. No open-source license is granted by this package. Copying, redistribution, sublicensing, publication, sale, transfer, or reuse outside the owner's private/internal use requires a separate written agreement with the copyright holder.
-
-THE SOFTWARE IS PROVIDED WITHOUT ANY EXPRESS OR IMPLIED WARRANTY TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW.
