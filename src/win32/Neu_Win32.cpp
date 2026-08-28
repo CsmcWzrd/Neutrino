@@ -4988,24 +4988,91 @@ void Neu_TabView::setParent(Neu_Window* parent)
     }
 }
 
+namespace {
+
+static int tabColorBrightnessWin32(const Neu_Color& c)
+{
+    return static_cast<int>(c.r) * 299 + static_cast<int>(c.g) * 587 + static_cast<int>(c.b) * 114;
+}
+
+static Neu_Color inactiveTabColorWin32(const Neu_Theme& theme)
+{
+    return tabColorBrightnessWin32(theme.highlight) < 128000
+               ? Neu_LightenColor(theme.highlight, 28)
+               : Neu_DarkenColor(theme.highlight, 28);
+}
+
+static bool horizontalTabsWin32(Neu_TabPosition position)
+{
+    return position == Neu_TabPosition::Top || position == Neu_TabPosition::Bottom;
+}
+
+static Neu_Rect tabContentRectWin32(const Neu_Rect& r, Neu_TabPosition position, int thickness)
+{
+    const int t = std::max(28, thickness);
+    switch (position) {
+    case Neu_TabPosition::Bottom:
+        return Neu_Rect{r.x + 4, r.y + 4, std::max(1, r.width - 8), std::max(1, r.height - t - 8)};
+    case Neu_TabPosition::Left:
+        return Neu_Rect{r.x + t + 4, r.y + 4, std::max(1, r.width - t - 8), std::max(1, r.height - 8)};
+    case Neu_TabPosition::Right:
+        return Neu_Rect{r.x + 4, r.y + 4, std::max(1, r.width - t - 8), std::max(1, r.height - 8)};
+    case Neu_TabPosition::Top:
+    default:
+        return Neu_Rect{r.x + 4, r.y + t + 4, std::max(1, r.width - 8), std::max(1, r.height - t - 8)};
+    }
+}
+
+static Neu_Rect tabBarRectWin32(const Neu_Rect& r, Neu_TabPosition position, int thickness)
+{
+    const int t = std::max(28, thickness);
+    switch (position) {
+    case Neu_TabPosition::Bottom:
+        return Neu_Rect{r.x + 4, r.y + r.height - t, std::max(1, r.width - 8), t - 4};
+    case Neu_TabPosition::Left:
+        return Neu_Rect{r.x + 4, r.y + 4, t - 4, std::max(1, r.height - 8)};
+    case Neu_TabPosition::Right:
+        return Neu_Rect{r.x + r.width - t, r.y + 4, t - 4, std::max(1, r.height - 8)};
+    case Neu_TabPosition::Top:
+    default:
+        return Neu_Rect{r.x + 4, r.y + 4, std::max(1, r.width - 8), t - 4};
+    }
+}
+
+}
+
 void Neu_TabView::draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme)
 {
     Neu_Control::draw(d, drawable, gc, theme);
     Neu_Rect r = bounds();
-    const int tabH = 26;
-    int x = r.x + 6;
+    const Neu_Rect content = tabContentRectWin32(r, tabPosition_, tabBarThickness_);
+
+    fillRound(drawable, content, std::max(2, theme.radius), rgb(Neu_MixColor(theme.glass, theme.background, 0.25)), rgb(theme.border));
+
+    const Neu_Rect bar = tabBarRectWin32(r, tabPosition_, tabBarThickness_);
+    const bool horizontal = horizontalTabsWin32(tabPosition_);
+    int cursor = horizontal ? bar.x + 2 : bar.y + 2;
+    const Neu_Color inactive = inactiveTabColorWin32(theme);
     for (size_t i = 0; i < titles_.size(); ++i) {
-        const int w = std::max(72, static_cast<int>(titles_[i].size()) * 8 + 18);
-        RECT tr{x, r.y + 4, x + w, r.y + 4 + tabH};
-        HBRUSH b = CreateSolidBrush(rgb(static_cast<int>(i) == selectedTab_ ? theme.pressed : theme.hover));
-        FillRect(drawable, &tr, b);
-        DeleteObject(b);
-        FrameRect(drawable, &tr, reinterpret_cast<HBRUSH>(GetStockObject(GRAY_BRUSH)));
-        drawPlainTextWin(drawable, theme, titles_[i], x + 8, r.y + 8, x + w - 4, r.y + 4 + tabH, rgb(theme.text));
-        x += w + 2;
+        const bool selected = static_cast<int>(i) == selectedTab_;
+        const int measured = static_cast<int>(titles_[i].size()) * 8 + 22;
+        const int major = horizontal ? std::max(minimumTabButtonSize_, measured) : std::max(34, minimumTabButtonSize_);
+        const Neu_Rect tab = horizontal
+            ? Neu_Rect{cursor, bar.y + 2, major, std::max(24, bar.height - 4)}
+            : Neu_Rect{bar.x + 2, cursor, std::max(48, bar.width - 4), std::max(24, major)};
+        fillRound(drawable, tab, std::max(2, theme.radius), rgb(selected ? theme.highlight : inactive), rgb(selected ? theme.focus : theme.border));
+        drawPlainTextWin(drawable, theme, titles_[i],
+                         tab.x + 9, tab.y + std::max(3, (tab.height - 16) / 2),
+                         tab.x + tab.width - 9, tab.y + tab.height - 3,
+                         rgb(theme.text));
+        cursor += major + 3;
     }
+
     if (selectedTab_ >= 0 && selectedTab_ < static_cast<int>(pages_.size()) && pages_[static_cast<size_t>(selectedTab_)]) {
+        int saved = SaveDC(drawable);
+        IntersectClipRect(drawable, content.x, content.y, content.x + content.width, content.y + content.height);
         pages_[static_cast<size_t>(selectedTab_)]->draw(d, drawable, gc, theme);
+        RestoreDC(drawable, saved);
     }
     drawHintPopup(d, drawable, gc, theme);
 }
@@ -5014,15 +5081,21 @@ void Neu_TabView::handleXEvent(XEvent& ev)
 {
     Neu_Rect r = bounds();
     if ((ev.message == WM_LBUTTONDOWN || ev.message == WM_LBUTTONUP) && contains(ev.x, ev.y)) {
-        int x = r.x + 6;
+        const Neu_Rect bar = tabBarRectWin32(r, tabPosition_, tabBarThickness_);
+        const bool horizontal = horizontalTabsWin32(tabPosition_);
+        int cursor = horizontal ? bar.x + 2 : bar.y + 2;
         for (size_t i = 0; i < titles_.size(); ++i) {
-            const int w = std::max(72, static_cast<int>(titles_[i].size()) * 8 + 18);
-            if (ev.y >= r.y + 4 && ev.y <= r.y + 30 && ev.x >= x && ev.x <= x + w) {
+            const int measured = static_cast<int>(titles_[i].size()) * 8 + 22;
+            const int major = std::max(minimumTabButtonSize_, measured);
+            const Neu_Rect tab = horizontal
+                ? Neu_Rect{cursor, bar.y + 2, major, std::max(24, bar.height - 4)}
+                : Neu_Rect{bar.x + 2, cursor, std::max(48, bar.width - 4), std::max(24, major)};
+            if (ev.y >= tab.y && ev.y <= tab.y + tab.height && ev.x >= tab.x && ev.x <= tab.x + tab.width) {
                 selectedTab_ = static_cast<int>(i);
                 requestRedraw();
                 return;
             }
-            x += w + 2;
+            cursor += major + 3;
         }
     }
     if (selectedTab_ >= 0 && selectedTab_ < static_cast<int>(pages_.size()) && pages_[static_cast<size_t>(selectedTab_)]) {

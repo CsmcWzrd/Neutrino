@@ -921,6 +921,13 @@ public:
     void draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme) override;
 };
 
+enum class Neu_TabPosition {
+    Top,
+    Bottom,
+    Left,
+    Right
+};
+
 class Neu_TabView : public Neu_Placement {
 public:
     using Neu_Placement::Neu_Placement;
@@ -928,6 +935,12 @@ public:
     int addTab(const std::string& title, std::shared_ptr<Neu_Placement> page);
     void setSelectedTab(int index) { selectedTab_ = std::max(0, std::min(index, static_cast<int>(pages_.size()) - 1)); requestRedraw(); }
     int selectedTab() const { return selectedTab_; }
+    void setTabPosition(Neu_TabPosition position) { tabPosition_ = position; requestRedraw(); }
+    Neu_TabPosition tabPosition() const { return tabPosition_; }
+    void setTabBarThickness(int pixels) { tabBarThickness_ = std::max(28, pixels); requestRedraw(); }
+    int tabBarThickness() const { return tabBarThickness_; }
+    void setMinimumTabButtonSize(int pixels) { minimumTabButtonSize_ = std::max(48, pixels); requestRedraw(); }
+    int minimumTabButtonSize() const { return minimumTabButtonSize_; }
     void setParent(Neu_Window* parent) override;
     void draw(Display* d, Drawable drawable, GC gc, const Neu_Theme& theme) override;
     void handleXEvent(XEvent& ev) override;
@@ -935,6 +948,9 @@ private:
     std::vector<std::string> titles_;
     std::vector<std::shared_ptr<Neu_Placement>> pages_;
     int selectedTab_{0};
+    Neu_TabPosition tabPosition_{Neu_TabPosition::Top};
+    int tabBarThickness_{32};
+    int minimumTabButtonSize_{76};
 };
 
 class Neu_Splitter : public Neu_Placement {
