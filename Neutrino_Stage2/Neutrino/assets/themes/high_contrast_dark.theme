@@ -1,9 +1,0 @@
-# Neutrino proprietary theme asset: high_contrast_dark
-name=high_contrast_dark
-background=#000000
-glass=#101010
-border=#FFFFFF
-text=#FFFFFF
-accent=#00FFFF
-hover=#1E1E1E
-pressed=#303030
